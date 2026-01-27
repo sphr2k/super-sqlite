@@ -1,0 +1,32 @@
+{
+  "name": "supersqlite",
+  "version": "1.0.0",
+  "description": "SuperJSON-powered SQLite with ArkType-enforced schemas and expression indexes",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx vitest run",
+    "start": "npx tsc && node dist/index.js",
+    "ecommerce:seed": "npx tsc && node dist/seed-benchmark.js",
+    "ecommerce:bench": "npx tsc && node dist/benchmark.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@faker-js/faker": "^10.2.0",
+    "arktype": "^2.1.29",
+    "better-sqlite3": "^12.6.2",
+    "drizzle-orm": "^0.45.1",
+    "superjson": "^2.2.6",
+    "ulid": "^3.0.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.0.10",
+    "drizzle-kit": "^0.31.8",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
