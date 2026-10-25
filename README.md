@@ -261,6 +261,59 @@ Index reconciliation now inspects SQLite `PRAGMA index_list` and `index_xinfo`
 in addition to canonical expression syntax. Unmanaged or ambiguous index
 names remain protected; destructive actions still require explicit opt-in.
 
+### Raw JSON snapshot import lifecycle
+
+`createSnapshotStore` stages arbitrary ArkType-validated JSON documents in a
+SQLite `(id, data)` table, with a JSON-expression index on `batchId`. Each
+snapshot is scoped to an independent namespace, e.g. a cloud provider.
+Its separate metadata tables track pending batch sizes and atomically active
+heads. Both D1 and BetterSQLite3 share the same asynchronous API.
+
+```ts
+import { type } from 'arktype';
+import { createSnapshotStore } from 'supersqlite';
+import { D1Adapter } from 'supersqlite/d1';
+
+const store = createSnapshotStore('keeper', type({
+  country: 'string', raw: 'unknown', single: 'number | null'
+}), new D1Adapter(env.DB));
+
+// Provision once, not on each Worker request:
+await store.initialize();
+const next = await store.begin('AWS', 'sha256-hex-of-source', 2);
+if (next.status === 'upload') {
+  await store.append(next.batchId, 0, [
+    { country: 'DE', raw: { server_id: 'a' }, single: 123 },
+    { country: 'US', raw: { server_id: 'b' }, single: null }
+  ]);
+  await store.publish(next.batchId);
+}
+const active = await store.readActivePage('AWS', { limit: 200 });
+```
+
+API: `initialize`, `begin`, `import`, `append`, `countBatch`,
+`publish`, `head`, `listHeads`, `readBatchPage`, `readActivePage`,
+and `prune`. Large reads use cursor pagination (up to 500 documents/page).
+The importer only accepts chunks of 1–50 documents; IDs are deterministic
+(`batchId:offset`) and retries with identical source payloads are idempotent.
+Conflicting retries fail with `SnapshotConflictError`.
+
+`publish` verifies row completeness and the initial head in one conditional
+SQLite statement before switching the namespace's visible snapshot. Other
+readers never see a partially imported batch. Parallel overlapping imports
+of one namespace cannot silently overwrite a changed head. Obsolete batches
+are **not** automatically deleted; `prune` rejects active snapshots and
+is intended for explicit post-publish cleanup. Old consumer code and
+existing tables are unchanged; no implicit destructive cutover.
+
+The snapshot records preserve the original data inside SuperJSON `value`.
+Only records selected by the caller are stored; source collection and
+normalization policy remain the caller's responsibility. Use an explicitly
+versioned source format if upstream JSON fields undergo incompatible changes.
+
+To install SuperSQLite directly from the Git repository, `npm prepare`
+builds the side-effect-free ESM library and generated declaration files.
+
 ## Development
 
 ```bash
