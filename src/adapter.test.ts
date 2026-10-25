@@ -39,7 +39,10 @@ for (const kind of ['better-sqlite3', 'd1-mock'] as const) {
       const schema = type({ age: 'string.numeric.parse', 'id?': 'string' });
       const repo = arktypeJsonTable('Person', schema, 'people', adapter, ['age']);
       await repo.initialize();
-      const inserted = await repo.insert({ age: '42' } as any);
+      // Input is a string, while the typed output is a number after the morph.
+      const inserted = await repo.insert({ age: '42' });
+      const parsedAge: number = inserted.age;
+      expect(parsedAge).toBe(42);
       expect(inserted.age).toBe(42);
       const row = await repo.findById(inserted.id);
       expect(row?.age).toBe(42);
@@ -59,12 +62,18 @@ for (const kind of ['better-sqlite3', 'd1-mock'] as const) {
       await profiles.insert({ id: 'p1', userId: 'u1', bio: 'Hello' });
       expect(await users.findByField('active', true)).toHaveLength(1);
       expect(await users.select({ email: true }).where({ active: false }).all()).toEqual([{ id: 'u2', email: 'bob@example.org' }]);
+      expect(await users.select({ email: true }).where({ active: true }).where({ id: 'u1' }).all())
+        .toEqual([{ id: 'u1', email: 'alice@example.org' }]);
+      expect(await users.select().where({ active: true }).where({ id: 'u2' }).get()).toBeUndefined();
       const joined = await users.leftJoin(profiles, { id: 'userId' }).select().all();
       expect(joined).toHaveLength(2);
       expect(joined[0].profiles).toMatchObject({ bio: 'Hello' });
       expect(joined[1].profiles).toBeNull();
       const filtered = await users.join(profiles, { id: 'userId' }).where({ profiles: { bio: 'Hello' } }).all();
       expect(filtered).toHaveLength(1);
+      expect(await users.join(profiles, { id: 'userId' })
+        .select().where({ profiles: { bio: 'Hello' } }).where({ users: { active: true } }).all())
+        .toHaveLength(1);
       const plan = sqlite.prepare("EXPLAIN QUERY PLAN SELECT * FROM users WHERE json_extract(data, '$.json.email') = ?").get('alice@example.org') as { detail: string };
       expect(plan.detail).toContain('idx_users_email');
       sqlite.close();

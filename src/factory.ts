@@ -24,22 +24,25 @@ type Filter = Record<string, unknown> | SQL;
 type Projection = Record<string, boolean>;
 
 function query<T>(adapter: SQLiteAdapter, base: SQL, decode: (row: SqlRow) => T, filter: (condition: Filter) => SQL | undefined) {
-  function withWhere(current: SQL) {
+  function withWhere(predicates: SQL[] = []) {
+    const current = () => predicates.length > 0
+      ? sql`${base} WHERE ${and(...predicates)}`
+      : base;
     return {
       where(condition: Filter) {
         const predicate = filter(condition);
-        return withWhere(predicate ? sql`${current} WHERE ${predicate}` : current);
+        return withWhere(predicate ? [...predicates, predicate] : predicates);
       },
       async all(): Promise<T[]> {
-        return (await adapter.all(statement(current))).map(decode);
+        return (await adapter.all(statement(current()))).map(decode);
       },
       async get(): Promise<T | undefined> {
-        const row = await adapter.get(statement(sql`${current} LIMIT 1`));
+        const row = await adapter.get(statement(sql`${current()} LIMIT 1`));
         return row === undefined ? undefined : decode(row);
       }
     };
   }
-  return withWhere(base);
+  return withWhere();
 }
 
 /**
@@ -53,7 +56,9 @@ export function arktypeJsonTable<T extends Type<any>>(
   adapter: SQLiteAdapter,
   indexFields: string[] = []
 ) {
+  type DataInput = T['inferIn'];
   type DataType = T['infer'];
+  type Persisted = DataType & { id: string };
   identifier(tableName);
   indexFields.forEach(identifier);
 
@@ -79,7 +84,7 @@ export function arktypeJsonTable<T extends Type<any>>(
     }
   });
 
-  function decode(row: SqlRow): DataType {
+  function decode(row: SqlRow): Persisted {
     const parsed = superjson.parse<DataType>(String(row.data));
     return { ...parsed, id: String(row.id) };
   }
@@ -166,6 +171,29 @@ export function arktypeJsonTable<T extends Type<any>>(
     return builder;
   }
 
+  async function insert(values: DataInput): Promise<Persisted>;
+  async function insert(values: DataInput[]): Promise<Persisted[]>;
+  async function insert(values: DataInput | DataInput[]): Promise<Persisted | Persisted[]> {
+    const arr = Array.isArray(values) ? values : [values];
+    const stored = arr.map(value => {
+      const result = schema(value);
+      if (result instanceof type.errors) throw new Error(`Validation Error: ${result.summary}`);
+      const validated = result as DataType; // Persist morph output, never the raw input.
+      const suppliedId = (validated as { id?: unknown }).id;
+      const id = typeof suppliedId === 'string' && suppliedId.length > 0 ? suppliedId : ulid();
+      return { id, data: superjson.stringify(validated), value: { ...validated, id } as Persisted };
+    });
+    for (let i = 0; i < stored.length; i += BATCH_SIZE) {
+      const chunk = stored.slice(i, i + BATCH_SIZE);
+      await adapter.batch(chunk.map(({ id, data }) => ({
+        sql: `INSERT INTO "${tableName}" (id, data) VALUES (?, ?)`,
+        params: [id, data]
+      })));
+    }
+    const result = stored.map(v => v.value);
+    return Array.isArray(values) ? result : result[0];
+  }
+
   return {
     table: rawTable,
     proxy,
@@ -179,32 +207,13 @@ export function arktypeJsonTable<T extends Type<any>>(
       }
     },
 
-    async insert(values: DataType | DataType[]): Promise<any> {
-      const arr = Array.isArray(values) ? values : [values];
-      const stored = arr.map(value => {
-        const result = schema(value);
-        if (result instanceof type.errors) throw new Error(`Validation Error: ${result.summary}`);
-        const validated = result as DataType; // Persist the validated/transformed value, not input!
-        const suppliedId = (validated as { id?: unknown }).id;
-        const id = typeof suppliedId === 'string' && suppliedId.length > 0 ? suppliedId : ulid();
-        return { id, data: superjson.stringify(validated), value: { ...validated, id } };
-      });
-      for (let i = 0; i < stored.length; i += BATCH_SIZE) {
-        const chunk = stored.slice(i, i + BATCH_SIZE);
-        await adapter.batch(chunk.map(({ id, data }) => ({
-          sql: `INSERT INTO "${tableName}" (id, data) VALUES (?, ?)`,
-          params: [id, data]
-        })));
-      }
-      const result = stored.map(v => v.value);
-      return Array.isArray(values) ? result : result[0];
-    },
+    insert,
 
     select,
     join: (otherRepo: any, fields: Record<string, string>) => createJoinBuilder().join(otherRepo, fields),
     leftJoin: (otherRepo: any, fields: Record<string, string>) => createJoinBuilder().leftJoin(otherRepo, fields),
 
-    async findById(id: string): Promise<DataType | undefined> {
+    async findById(id: string): Promise<Persisted | undefined> {
       return select().where({ id }).get();
     },
     async findByField(fieldName: string, value: unknown): Promise<DataType[]> {

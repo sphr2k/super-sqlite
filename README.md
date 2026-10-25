@@ -115,6 +115,9 @@ const joined = await instances.leftJoin(otherRepo, { id: 'instanceId' }).select(
 
 Schema validation, including ArkType morphs, occurs before insert; **the
 validated/transformed result is persisted**, not the unvalidated input.
+The `insert()` API accepts ArkType's **input** type (`inferIn`) and returns
+its **output** type (`infer`) with a generated or supplied string `id`.
+Multiple `.where()` calls are combined with `AND`.
 
 **Caveat:** Schema-less documents don't give you native relational foreign-key
 constraints or column-level SQL typing. Expression indexes are appropriate for
@@ -131,6 +134,6 @@ npm run ecommerce:bench
 ```
 
 The tests exercise native SQLite, the D1 adapter with a D1-compatible mock,
-joins, optional fields, serialized rich types, morph persistence, batch
-rollback and JSON/NDJSON inference. A deployed Cloudflare D1 integration test
-is not included.
+**real local D1 via Miniflare/workerd**, joins, optional fields, serialized
+rich types, morph persistence, batch rollback, chained filters and JSON/NDJSON
+inference. A deployed Cloudflare D1 integration test is not included.
