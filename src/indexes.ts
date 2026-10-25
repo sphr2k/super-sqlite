@@ -19,10 +19,19 @@ function expectedSql(tableName: string, field: string): string {
   return `CREATE INDEX "idx_${tableName}_${field}" ON "${tableName}" (json_extract(data, '$.json.${field}'))`;
 }
 
-function canonicalSql(value: string): string {
-  // SQLite stores the original CREATE statement, including IF NOT EXISTS.
-  // Earlier SuperSQLite releases used that clause for every generated index.
-  return value.replace(/^CREATE\s+INDEX\s+IF\s+NOT\s+EXISTS\s+/i, 'CREATE INDEX ').trim();
+/** Match only exactly the managed expression, allowing harmless SQL formatting
+ * differences without treating different JSON paths as equivalent. */
+function isManagedExpression(definition: string, table: string, name: string, field: string): boolean {
+  const ident = (word: string) => `(?:"${word}"|\`${word}\`|\[${word}\]|${word})`;
+  const grammar = [
+    '^CREATE\\s+INDEX\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?',
+    ident(name), '\\s+ON\\s+', ident(table),
+    '\\s*\\(\\s*json_extract\\s*\\(\\s*(?:"data"|`data`|data)\\s*,\\s*',
+    "'([^']+)'",
+    '\\s*\\)\\s*\\)\\s*;?\\s*$'
+  ].join('');
+  const matched = new RegExp(grammar, 'i').exec(definition);
+  return matched !== null && matched[1] === `$.json.${field}`;
 }
 
 export function createIndexManager(adapter: SQLiteAdapter, tableName: string, desiredFields: readonly string[]) {
@@ -36,14 +45,26 @@ export function createIndexManager(adapter: SQLiteAdapter, tableName: string, de
       sql: 'SELECT name, sql FROM sqlite_master WHERE type = ? AND tbl_name = ? ORDER BY name',
       params: ['index', tableName]
     });
+    const metadata = await adapter.all<{ name: string; unique: number; origin: string; partial: number }>({
+      sql: `PRAGMA index_list("${tableName}")`
+    });
+    const byName = new Map(metadata.map(item => [item.name, item]));
     const found = new Set<string>();
     const operations: IndexOperation[] = [];
     for (const index of existing) {
       if (!index.name.startsWith(prefix)) continue;
       const field = index.name.slice(prefix.length);
       // Treat only exact generated definitions as managed; don't delete user/manual indexes.
+      const meta = byName.get(index.name);
+      const columns = await adapter.all<{ cid: number; key: number; desc: number; coll: string }>({
+        sql: `PRAGMA index_xinfo("${index.name}")`
+      });
+      const keyColumns = columns.filter(column => column.key === 1);
       const generated = /^[A-Za-z_][A-Za-z0-9_]*$/.test(field) &&
-        index.sql != null && canonicalSql(index.sql) === expectedSql(tableName, field);
+        meta?.origin === 'c' && meta.unique === 0 && meta.partial === 0 &&
+        keyColumns.length === 1 && keyColumns[0].cid === -2 &&
+        keyColumns[0].desc === 0 && keyColumns[0].coll === 'BINARY' &&
+        index.sql != null && isManagedExpression(index.sql, tableName, index.name, field);
       if (!generated) {
         if (desired.has(field)) throw new Error(`Conflicting unmanaged index: ${index.name}`);
         continue;

@@ -58,3 +58,15 @@ repo.leftJoin(profiles, { id: 'userId' }).where({ profiles: { bibio: 'wrong' } }
 repo.leftJoin(profiles, { nonExisting: 'userId' });
 // @ts-expect-error join target field must exist in the target repository
 repo.leftJoin(profiles, { id: 'userIDD' });
+const rich = arktypeJsonTable('Rich', type({id:'string', tags:type.instanceOf(Set)}), 'rich',
+  new BetterSQLite3Adapter(new Database(':memory:')));
+// @ts-expect-error Set is not comparable with SQL equality
+rich.findByField('tags', new Set(['a']));
+const richSchema = type({id:'string', tags:type.instanceOf(Set)});
+// @ts-expect-error Set fields cannot be indexed
+arktypeJsonTable('Rich', richSchema, 'rich', new BetterSQLite3Adapter(new Database(':memory:')), ['tags']);
+
+// @ts-expect-error Rich document values are never valid for selectScalar
+rich.selectScalar({ tags: true });
+const scalarProjection: Promise<Array<{ id: string; active: boolean }>> = repo.selectScalar({ active: true }).all();
+void scalarProjection;
