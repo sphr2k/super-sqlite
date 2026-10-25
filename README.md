@@ -24,8 +24,8 @@ npm start
 ```ts
 import Database from 'better-sqlite3';
 import { type } from 'arktype';
-import { arktypeJsonTable } from './src/factory.js';
-import { BetterSQLite3Adapter } from './src/adapters/better-sqlite3.js';
+import { arktypeJsonTable } from 'supersqlite';
+import { BetterSQLite3Adapter } from 'supersqlite/node';
 
 const sqlite = new Database(':memory:');
 const db = new BetterSQLite3Adapter(sqlite);
@@ -55,9 +55,9 @@ const filtered = await instances.select({ provider: true, vcpu: true })
 Bind a D1 database in your Worker as `DB`, then:
 
 ```ts
-import { D1Adapter } from './src/adapters/d1.js';
-import { arktypeJsonTable } from './src/factory.js';
-import { Instance } from './src/generated/instance.js';
+import { D1Adapter } from 'supersqlite/d1';
+import { arktypeJsonTable } from 'supersqlite';
+import { Instance } from './generated/instance.js';
 
 const db = new D1Adapter(env.DB);
 const instances = arktypeJsonTable('Instance', Instance, 'instances', db, ['provider']);
@@ -128,10 +128,34 @@ the requested fields plus `id`; joined rows have typed table-name keys, with
 nullable records for left joins. Custom Drizzle SQL expressions remain
 available, but their arbitrary projection values are typed as `unknown`.
 
-For correct projections of `Date`, `Set`, `Map`, and boolean fields, the current
-implementation fetches and hydrates the full SuperJSON envelope, then projects
-in JavaScript. Consequently, partial projections do **not** reduce database
-payload size. Keep this in mind for large documents or high-volume queries.
+By default, every read validates the **whole** persisted document using
+`schema.out`, even without schema evolution configured. This catches corrupted
+records and mismatches between the row ID and the stored JSON ID. Strict
+projections hydrate the complete SuperJSON envelope, retaining correct
+`Date`, `Set`, `Map`, and boolean values. This deliberately trades additional
+DB payload for integrity.
+
+For performance-sensitive **non-nullable scalar** projections, an explicitly
+weaker alternative is available:
+
+```ts
+const results = await instances.selectScalar({ provider: true, vcpu: true })
+  .where({ provider: 'aws' }).all();
+```
+
+`selectScalar()` fetches only the selected JSON1 fields, validates **those
+fields only**, and converts booleans and dates back to their JS types. It does
+**not** validate other fields or run upcasters; it rejects evolution-enabled
+repositories, optional projections, and non-queryable complex types. Use
+`select()` when full document validation is required.
+
+A reproducible local benchmark is included: `npm run bench:projection`.
+On one run using 2,000 documents with 4-KiB string payloads, 1,000 matching
+rows and 15 alternating timing rounds, the median was **11.09 ms** for strict
+hydration, **1.67 ms** for `selectScalar()` and **0.75 ms** for raw JSON1
+projection. This is an in-memory SQLite microbenchmark, not representative of
+Cloudflare D1 network behavior.
+
 
 ### Versioned schema evolution
 
@@ -216,6 +240,26 @@ them before applying to production D1.
 constraints or column-level SQL typing. Expression indexes are appropriate for
 a bounded set of frequently queried fields. For many joins or structured SQL
 queries, consider ordinary Drizzle tables instead.
+
+### Package architecture and runtime isolation
+
+The ESM package publishes a side-effect-free core (`supersqlite`), a Node-only
+adapter (`supersqlite/node`) and a Cloudflare D1 adapter (`supersqlite/d1`).
+`better-sqlite3` is an **optional peer dependency**, so D1-only applications
+do not need a native Node driver. The executable demo remains available via
+`npm start` but is not imported by the library. `npm run smoke` validates
+package exports, generated TypeScript declarations, CLI packaging, and D1
+import isolation. `npm run build` emits both JS and `.d.ts` files.
+
+The core code is separated into `factory.ts` (repository composition),
+`query.ts` (query building and types), `fields.ts` (ArkType/SQL field metadata),
+`document.ts` (SuperJSON codec and validation), `mutations.ts` (revision-safe
+writes and schema upgrades), `projections.ts` (explicit scalar fast path),
+`indexes.ts` (metadata-backed index plans) and `adapters/` (driver implementations).
+
+Index reconciliation now inspects SQLite `PRAGMA index_list` and `index_xinfo`
+in addition to canonical expression syntax. Unmanaged or ambiguous index
+names remain protected; destructive actions still require explicit opt-in.
 
 ## Development
 

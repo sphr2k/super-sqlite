@@ -2,24 +2,24 @@
   "name": "supersqlite",
   "version": "1.0.0",
   "description": "SuperJSON-powered SQLite with ArkType-enforced schemas and expression indexes",
-  "main": "index.js",
+  "main": "./dist/index.js",
   "scripts": {
     "test": "npx vitest run",
-    "start": "npx tsc && node dist/index.js",
+    "start": "npm run build && node dist/demo.js",
     "ecommerce:seed": "npx tsc && node dist/seed-benchmark.js",
     "ecommerce:bench": "npx tsc && node dist/benchmark.js",
     "typecheck": "tsc --noEmit",
     "infer": "tsx src/cli.ts infer",
-    "build": "tsc"
+    "build": "tsc",
+    "smoke": "node scripts/package-smoke.mjs",
+    "bench:projection": "npm run build && node benchmarks/projections.mjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
-    "@faker-js/faker": "^10.2.0",
     "arktype": "^2.1.29",
-    "better-sqlite3": "^12.6.2",
     "drizzle-orm": "^0.45.1",
     "superjson": "^2.2.6",
     "ulid": "^3.0.2"
@@ -32,12 +32,54 @@
     "miniflare": "^4.20260730.0",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "better-sqlite3": "^12.6.2",
+    "@faker-js/faker": "^10.2.0"
   },
   "bin": {
     "super-sqlite": "./dist/cli.js"
   },
   "engines": {
     "node": "^20.19.0 || >=22.13.0"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
+    },
+    "./d1": {
+      "types": "./dist/cloudflare.d.ts",
+      "default": "./dist/cloudflare.js"
+    },
+    "./factory": {
+      "types": "./dist/factory.d.ts",
+      "default": "./dist/factory.js"
+    },
+    "./adapters/d1": {
+      "types": "./dist/adapters/d1.d.ts",
+      "default": "./dist/adapters/d1.js"
+    },
+    "./adapters/better-sqlite3": {
+      "types": "./dist/adapters/better-sqlite3.d.ts",
+      "default": "./dist/adapters/better-sqlite3.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "peerDependencies": {
+    "better-sqlite3": "^12.6.2"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": true
+    }
   }
 }

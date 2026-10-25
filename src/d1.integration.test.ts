@@ -33,6 +33,8 @@ describe('Cloudflare D1 integration (Miniflare/workerd)', () => {
       ]);
 
       expect(await repo.findById('a')).toEqual({ id: 'a', age: 42, region: 'EU' });
+      expect(await repo.selectScalar({ region: true }).where({ age: 42 }).get())
+        .toEqual({ id: 'a', region: 'EU' });
       expect(await repo.select({ age: true, region: true })
         .where({ region: 'EU' }).where({ age: 42 }).all())
         .toEqual([{ id: 'a', age: 42, region: 'EU' }]);
@@ -85,4 +87,20 @@ describe('Cloudflare D1 integration (Miniflare/workerd)', () => {
     } finally { await mf.dispose(); }
   }, 20_000);
 
+
+  it('rejects corrupt stored records under native D1 without evolution config', async () => {
+    const mf = new Miniflare({
+      modules: true,
+      script: 'export default { fetch() { return new Response("ok"); } }',
+      d1Databases: { DB: 'supersqlite-validate-d1' }
+    });
+    try {
+      const db = await mf.getD1Database('DB');
+      const repo = arktypeJsonTable('Entry', type({id: 'string', count: 'number'}), 'entries', new D1Adapter(db));
+      await repo.initialize();
+      await db.prepare('INSERT INTO entries (id, data) VALUES (?, ?)')
+        .bind('invalid', JSON.stringify({json: {id: 'invalid', count: 'string'}})).run();
+      await expect(repo.findById('invalid')).rejects.toThrow(/Invalid document/);
+    } finally { await mf.dispose(); }
+  }, 20_000);
 });
