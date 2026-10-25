@@ -12,7 +12,8 @@
     "infer": "tsx src/cli.ts infer",
     "build": "tsc",
     "smoke": "node scripts/package-smoke.mjs",
-    "bench:projection": "npm run build && node benchmarks/projections.mjs"
+    "bench:projection": "npm run build && node benchmarks/projections.mjs",
+    "prepare": "npm run build"
   },
   "keywords": [],
   "author": "",

@@ -6,3 +6,5 @@ export type { SQLiteAdapter, SqlStatement, SqlRow, BindValue } from './adapters/
 export type { QueryBuilder, SqlScalar, QueryableKeys, FilterFields } from './query.js';
 export type { IndexApplyOptions, IndexOperation } from './indexes.js';
 export type { Repository, JoinBuilder, JoinFields, Entity } from './repository-types.js';
+export { createSnapshotStore, SnapshotConflictError, SnapshotNotFoundError, IncompleteSnapshotError } from './snapshots.js';
+export type { SnapshotHead, SnapshotImport, SnapshotPage, SnapshotRecord, BeginResult } from './snapshots.js';
