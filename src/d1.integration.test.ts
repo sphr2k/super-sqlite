@@ -52,4 +52,37 @@ describe('Cloudflare D1 integration (Miniflare/workerd)', () => {
       await mf.dispose();
     }
   }, 20_000);
+  it('updates documents with D1-native CAS, applies index plans and upcasts legacy JSON', async () => {
+    const mf = new Miniflare({
+      modules: true,
+      script: 'export default { fetch() { return new Response("ok"); } }',
+      d1Databases: { DB: 'supersqlite-enhancements' }
+    });
+    try {
+      const d1 = await mf.getD1Database('DB');
+      const adapter = new D1Adapter(d1);
+      const schema = type({ id: 'string', name: 'string', active: 'boolean' });
+      const repo = arktypeJsonTable('Entry', schema, 'entries', adapter, ['name'], {
+        evolution: { version: 2, upcasters: { 1: val => {
+          const old = val as { id: string; label: string };
+          return { id: old.id, name: old.label, active: true };
+        } } }
+      });
+      await repo.initialize();
+      await d1.prepare('INSERT INTO entries (id, data) VALUES (?, ?)')
+        .bind('legacy', JSON.stringify({ json: { id: 'legacy', label: 'Before' } })).run();
+      expect(await repo.findByIdWithRevision('legacy')).toMatchObject({
+        revision: 1, version: 1, value: { name: 'Before', active: true }
+      });
+      const next = await repo.update('legacy', { name: 'After' }, { expectedRevision: 1 });
+      expect(next).toMatchObject({ revision: 2, value: { name: 'After' } });
+      await expect(repo.update('legacy', { name: 'Stale' }, { expectedRevision: 1 })).rejects.toThrow(/conflict/);
+      const revised = arktypeJsonTable('Entry', schema, 'entries', adapter, ['active']);
+      expect((await revised.planIndexes()).map(op => op.action)).toEqual(['create', 'drop']);
+      await revised.applyIndexes({ dropObsolete: true });
+      expect(await revised.planIndexes()).toEqual([]);
+      expect(await repo.findByIdWithRevision('legacy')).toMatchObject({ revision: 2, version: 2 });
+    } finally { await mf.dispose(); }
+  }, 20_000);
+
 });

@@ -119,6 +119,99 @@ The `insert()` API accepts ArkType's **input** type (`inferIn`) and returns
 its **output** type (`infer`) with a generated or supplied string `id`.
 Multiple `.where()` calls are combined with `AND`.
 
+### Typed queries and projections
+
+Field names, scalar filter values, join keys, and nested joined filters are
+checked against ArkType's **output** types. This catches typos such as
+`findByField('regoin', 'eu')` at compile time. Projected rows contain only
+the requested fields plus `id`; joined rows have typed table-name keys, with
+nullable records for left joins. Custom Drizzle SQL expressions remain
+available, but their arbitrary projection values are typed as `unknown`.
+
+For correct projections of `Date`, `Set`, `Map`, and boolean fields, the current
+implementation fetches and hydrates the full SuperJSON envelope, then projects
+in JavaScript. Consequently, partial projections do **not** reduce database
+payload size. Keep this in mind for large documents or high-volume queries.
+
+### Versioned schema evolution
+
+Models may evolve without altering the SQLite document table:
+
+```ts
+const OldToNew = type({ id: 'string', region: 'string', enabled: 'boolean' });
+const regions = arktypeJsonTable('Region', OldToNew, 'regions', db, ['region'], {
+  evolution: {
+    version: 2,
+    upcasters: {
+      1: document => {
+        const old = document as { id: string; location: string };
+        return { id: old.id, region: old.location, enabled: true };
+      }
+    }
+  }
+});
+
+await regions.initialize();
+const current = await regions.findById('one'); // legacy v1 documents are upcast in memory
+const plan = await regions.upgradeDocuments({ dryRun: true, batchSize: 100 });
+const result = await regions.upgradeDocuments({ batchSize: 100 });
+```
+
+Version and revision live in the top-level `_supersqlite` metadata of the
+SuperJSON envelope, not in the user model or extra SQL columns. Existing
+metadata-free documents are treated as version 1, revision 1.
+
+Read-time upcasting is **lazy**: it never writes changes implicitly. Each
+upcaster advances one version, and the final document is validated against
+`schema.out`. Missing upcasters, invalid documents and future versions fail
+explicitly. `upgradeDocuments()` iterates in bounded, keyset-paginated batches
+and performs atomic, revision-conditional writes. Dry runs count candidates
+without changing storage.
+
+**Important:** JSON1 queries and expression indexes operate on **persisted**
+JSON, not on the lazy upcasted view. When a field is renamed, run
+`upgradeDocuments()` before querying or indexing the renamed field. Coordinate
+logical version changes with application deployments; old readers reject
+documents written at a newer version.
+
+### Safe updates and optimistic concurrency
+
+```ts
+const snapshot = await regions.findByIdWithRevision('one');
+if (snapshot) {
+  const { value, revision } = await regions.update('one',
+    { enabled: false },
+    { expectedRevision: snapshot.revision }
+  );
+}
+```
+
+`update(id, patch, options)` applies ArkType morphs to changed fields, validates
+the resulting **entire** document with `schema.out`, and performs one SQL
+`UPDATE ... WHERE revision = ? RETURNING` for atomic compare-and-swap on both
+backends. The revision increments on each successful write, and any updated
+legacy document is persisted at the current logical schema version. Passing
+`undefined` removes optional fields; required-field removal fails validation.
+Invalid patches, missing IDs, and lost races raise distinct errors
+(`DocumentNotFoundError`, `RevisionConflictError`). Callers can catch a
+conflict, reload, and decide whether to retry; updates do **not** silently
+overwrite another writer.
+
+### Declarative indexes
+
+```ts
+const planned = await regions.planIndexes();  // read-only CREATE/DROP plan
+await regions.applyIndexes();                // add missing managed indexes
+await regions.applyIndexes({ dropObsolete: true }); // explicitly remove obsolete ones
+```
+
+`initialize()` only creates missing managed indexes, never drops indexes.
+Index declarations are checked against ArkType fields at compile time. The
+planner recognizes generated indexes from older SuperSQLite versions and
+refuses to replace same-name indexes with unknown definitions. Manual indexes
+are untouched. Treat destructive plans as provisioning operations and review
+them before applying to production D1.
+
 **Caveat:** Schema-less documents don't give you native relational foreign-key
 constraints or column-level SQL typing. Expression indexes are appropriate for
 a bounded set of frequently queried fields. For many joins or structured SQL
@@ -135,5 +228,7 @@ npm run ecommerce:bench
 
 The tests exercise native SQLite, the D1 adapter with a D1-compatible mock,
 **real local D1 via Miniflare/workerd**, joins, optional fields, serialized
-rich types, morph persistence, batch rollback, chained filters and JSON/NDJSON
-inference. A deployed Cloudflare D1 integration test is not included.
+rich types, morph persistence, batch rollback, chained filters, schema
+upcasting, CAS conflicts, index planning, compile-time type regression
+assertions and JSON/NDJSON inference. A deployed Cloudflare D1 integration
+test is not included.
