@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { BetterSQLite3Adapter } from './adapters/better-sqlite3.js';
 import { arktypeJsonTable } from './factory.js';
 import { sql, eq, and, inArray } from 'drizzle-orm';
 import * as fs from 'fs';
@@ -17,21 +18,22 @@ async function runBenchmarks() {
     // Connect to persistent database
     const sqlite = new Database('ecommerce-benchmark.db');
     const db = drizzle(sqlite);
+    const adapter = new BetterSQLite3Adapter(sqlite);
 
     // Create repos (tables already exist)
-    const userRepo = arktypeJsonTable('User', User, 'users', db, ['username', 'email']);
-    const productRepo = arktypeJsonTable('Product', Product, 'products', db, ['id', 'category', 'inStock']);
-    const orderRepo = arktypeJsonTable('Order', Order, 'orders', db, ['userId', 'status']);
-    const orderItemRepo = arktypeJsonTable('OrderItem', OrderItem, 'order_items', db, ['orderId', 'productId']);
+    const userRepo = arktypeJsonTable('User', User, 'users', adapter, ['username', 'email']);
+    const productRepo = arktypeJsonTable('Product', Product, 'products', adapter, ['id', 'category', 'inStock']);
+    const orderRepo = arktypeJsonTable('Order', Order, 'orders', adapter, ['userId', 'status']);
+    const orderItemRepo = arktypeJsonTable('OrderItem', OrderItem, 'order_items', adapter, ['orderId', 'productId']);
 
     console.log("\n⚡ \x1b[1mSuperSQLite Performance Benchmarks\x1b[0m\n");
     console.log("═".repeat(60) + "\n");
 
     // Get dataset stats
-    const userCount = userRepo.getAll().length;
-    const productCount = productRepo.getAll().length;
-    const orderCount = orderRepo.getAll().length;
-    const itemCount = orderItemRepo.getAll().length;
+    const userCount = (await userRepo.getAll()).length;
+    const productCount = (await productRepo.getAll()).length;
+    const orderCount = (await orderRepo.getAll()).length;
+    const itemCount = (await orderItemRepo.getAll()).length;
 
     console.log("📊 Dataset:");
     console.log(`   • ${userCount.toLocaleString()} users`);
@@ -42,12 +44,12 @@ async function runBenchmarks() {
 
     // Benchmark 1: Indexed user lookup
     console.log("🔍 Benchmark 1: Find orders by userId (INDEXED)");
-    const users = userRepo.getAll();
+    const users = await userRepo.getAll();
     const randomUser = users[Math.floor(Math.random() * users.length)];
     console.log(`   User: ${randomUser.username}`);
 
     const q1Start = performance.now();
-    const userOrders = orderRepo.findByField('userId', randomUser.id);
+    const userOrders = await orderRepo.findByField('userId', randomUser.id);
     const q1Time = performance.now() - q1Start;
 
     console.log(`   ✅ Found ${userOrders.length} orders in ${q1Time.toFixed(2)}ms`);
@@ -65,7 +67,7 @@ async function runBenchmarks() {
     // Benchmark 2: Category query
     console.log("🔍 Benchmark 2: Find products by category (INDEXED)");
     const q2Start = performance.now();
-    const electronics = productRepo.findByField('category', 'electronics');
+    const electronics = await productRepo.findByField('category', 'electronics');
     const q2Time = performance.now() - q2Start;
     console.log(`   ✅ Found ${electronics.length} electronics in ${q2Time.toFixed(2)}ms\n`);
 
@@ -73,13 +75,13 @@ async function runBenchmarks() {
     console.log("⚔️  Benchmark 3: N+1 Queries vs SQL JOIN");
 
     // Find a user with many orders for fair comparison
-    const heavyUsers = users.slice(0, 100).map((u: any) => ({
+    const heavyUsers = (await Promise.all(users.slice(0, 100).map(async (u: any) => ({
         user: u,
-        orderCount: orderRepo.findByField('userId', u.id).length
-    })).sort((a: any, b: any) => b.orderCount - a.orderCount);
+        orderCount: (await orderRepo.findByField('userId', u.id)).length
+    })))).sort((a: any, b: any) => b.orderCount - a.orderCount);
 
     const heavyUser = heavyUsers[0].user;
-    const heavyUserOrders = orderRepo.findByField('userId', heavyUser.id);
+    const heavyUserOrders = await orderRepo.findByField('userId', heavyUser.id);
 
     console.log(`   Testing with user who has ${heavyUserOrders.length} orders\n`);
 
@@ -88,11 +90,9 @@ async function runBenchmarks() {
     const n1Start = performance.now();
     let n1ItemCount = 0;
     for (const order of heavyUserOrders) {
-        const items = orderItemRepo.findByField('orderId', order.id);
+        const items = await orderItemRepo.findByField('orderId', order.id);
         n1ItemCount += items.length;
-        items.forEach((item: OrderItemType) => {
-            productRepo.findById(item.productId);
-        });
+        await Promise.all(items.map((item: OrderItemType) => productRepo.findById(item.productId)));
     }
     const n1Time = performance.now() - n1Start;
     console.log(`   ⏱️  Fetched ${n1ItemCount} items + products in ${n1Time.toFixed(2)}ms`);
@@ -144,7 +144,7 @@ async function runBenchmarks() {
     // Approach 1: JavaScript aggregation (current approach)
     console.log("   🐌 Approach 1: JavaScript aggregation");
     const jsAggStart = performance.now();
-    const orders = orderRepo.getAll();
+    const orders = await orderRepo.getAll();
     const statusRevenue = new Map<string, number>();
     orders.forEach((o: any) => {
         statusRevenue.set(o.status, (statusRevenue.get(o.status) || 0) + o.totalAmount);
@@ -302,7 +302,7 @@ async function runBenchmarks() {
     last30Days.setDate(last30Days.getDate() - 30);
 
     const rangeStart = performance.now();
-    const recentOrders = orderRepo.findDateRange('createdAt', { start: last30Days });
+    const recentOrders = await orderRepo.findDateRange('createdAt', { start: last30Days });
     const rangeTime = performance.now() - rangeStart;
 
     console.log(`   ✅ Found ${recentOrders.length.toLocaleString()} orders from last 30 days in ${rangeTime.toFixed(2)}ms`);

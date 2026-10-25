@@ -7,7 +7,10 @@
     "test": "npx vitest run",
     "start": "npx tsc && node dist/index.js",
     "ecommerce:seed": "npx tsc && node dist/seed-benchmark.js",
-    "ecommerce:bench": "npx tsc && node dist/benchmark.js"
+    "ecommerce:bench": "npx tsc && node dist/benchmark.js",
+    "typecheck": "tsc --noEmit",
+    "infer": "tsx src/cli.ts infer",
+    "build": "tsc"
   },
   "keywords": [],
   "author": "",
@@ -28,5 +31,11 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
+  },
+  "bin": {
+    "super-sqlite": "./dist/cli.js"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.13.0"
   }
 }

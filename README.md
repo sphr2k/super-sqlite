@@ -1,112 +1,136 @@
-# SuperSQLite - SuperJSON-powered SQLite
+# SuperSQLite
 
-SuperSQLite is a **schema-less** but **strictly typed** database layer for SQLite that handles rich JavaScript types (Date, Set, Map, BigInt) transparently.
+Typed JSON documents on SQLite, backed by **ArkType**, **SuperJSON** and
+**Drizzle SQL expressions**. A single ArkType schema provides runtime
+validation and TypeScript types; the database has only an `id` and a
+`data` column. Queryable document fields use selective SQLite expression
+indexes. No schema migrations are required for new document properties.
 
-- **ArkType**: For runtime validation and TypeScript type inference (Source of Truth).
-- **SuperJSON**: To serialize/deserialize rich types (Date, Set, Map) transparently.
-- **Drizzle ORM**: For database interactions.
-- **SQLite**: As the backing store (using `better-sqlite3`).
+**Adapters:** local `better-sqlite3` and Cloudflare D1. All repository
+methods return Promises. Note that `better-sqlite3` itself executes
+synchronously; its adapter provides API compatibility, not non-blocking I/O.
 
-## Key Features
+## Get started
 
-- 🛡️ **Strict Runtime Typing**: Powered by ArkType for bulletproof data integrity.
-- 📦 **Rich Type Support**: Store `Date`, `Set`, `Map`, `BigInt`, and `RegExp` directly in SQLite.
-- 🏎️ **Expression Indexes**: Automatically creates SQLite expression indexes for fast JSON queries.
-- 🔌 **Seamless Drizzle Integration**: Leverages Drizzle ORM for a familiar developer experience.
-- 🏗️ **Zero Migrations**: Add or remove fields from your documents without painful SQL migrations.
+Requires Node.js 22.13+ (or 20.19+).
 
-## How it works
+```bash
+npm ci
+npm run typecheck
+npm test
+npm start
+```
 
-1. **Define Schema**: You define your data model using ArkType.
-2. **Generic Factory**: A helper function (`arktypeJsonTable`) creates a Drizzle table definition with a single `data` blob column.
-3. **Expression Indexes**: Automatically creates SQLite expression indexes on specialized fields for efficient querying.
-4. **Insert & Query**: 
-   - Data is validated against the ArkType schema.
-   - Serialized via SuperJSON (preserving rich types).
-   - Stored as a JSON string.
-   - Queries use `json_extract` and leverage indexes for performance.
-   - Results are automatically hydrated back to their original rich types.
+```ts
+import Database from 'better-sqlite3';
+import { type } from 'arktype';
+import { arktypeJsonTable } from './src/factory.js';
+import { BetterSQLite3Adapter } from './src/adapters/better-sqlite3.js';
 
-## Getting Started
+const sqlite = new Database(':memory:');
+const db = new BetterSQLite3Adapter(sqlite);
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-2. Run the basic example:
-   ```bash
-   npm start
-   ```
-
-3. Run the e-commerce benchmark (Joins & Performance):
-   ```bash
-   npm run ecommerce:bench
-   ```
-
-## Example Usage
-
-```typescript
-import { type } from "arktype";
-import { arktypeJsonTable } from "./factory";
-
-// 1. Define your schema
-const UserSchema = type({
-    id: "string",
-    name: "string",
-    email: "email",
-    roles: "string[]",
-    createdAt: "Date"
+const Instance = type({
+  id: 'string',
+  provider: 'string',
+  vcpu: 'number',
+  'price?': 'number'
 });
 
-// 2. Initialize the table
-const users = arktypeJsonTable('User', UserSchema, 'users', db, [
-    'email', 
-    'createdAt'
+const instances = arktypeJsonTable('Instance', Instance, 'instances', db, [
+  'provider', 'vcpu'
 ]);
-
-// 3. Use it!
-const newUser = {
-    id: "user_1",
-    name: "John Doe",
-    email: "john@example.com",
-    roles: ["admin"],
-    createdAt: new Date()
-};
-
-await users.insert(newUser);
-const results = await users.findByField('email', 'john@example.com');
+await instances.initialize();
+await instances.insert([
+  { id: 'a', provider: 'oci', vcpu: 2, price: 1.5 },
+  { id: 'b', provider: 'aws', vcpu: 4 }
+]);
+const oci = await instances.findByField('provider', 'oci');
+const filtered = await instances.select({ provider: true, vcpu: true })
+  .where({ vcpu: 2 }).all();
 ```
 
-## Expression Indexes for Performance
+### Cloudflare D1
 
-SuperSQLite automatically creates **SQLite expression indexes** on JSON fields to ensure efficient queries. You can specify which fields to index:
+Bind a D1 database in your Worker as `DB`, then:
 
-```typescript
-const repo = arktypeJsonTable('User', UserSchema, 'users', db, [
-    'email',      // Index for fast email lookups
-    'status',     // Index for querying by status
-    'createdAt'   // Index for date range queries
-]);
+```ts
+import { D1Adapter } from './src/adapters/d1.js';
+import { arktypeJsonTable } from './src/factory.js';
+import { Instance } from './src/generated/instance.js';
+
+const db = new D1Adapter(env.DB);
+const instances = arktypeJsonTable('Instance', Instance, 'instances', db, ['provider']);
+await instances.initialize();
+await instances.insert({ id: 'a', provider: 'oci', vcpu: 2 });
+const rows = await instances.getAll();
 ```
 
-**Benefits:**
-- ✅ **Fast queries** on indexed fields (O(log n) instead of O(n) table scans)
-- ✅ **No schema migration** needed when adding/removing indexes (just edit the array)
-- ✅ **Selective indexing** - only index fields you actually query
+The adapters implement `run`, `all`, `get`, and atomic `batch`.
+D1 uses bound parameters and `D1Database.batch()`, while better-sqlite3
+uses native transactions. Array inserts are chunked into groups of 100
+statements so D1 never receives a single oversized `INSERT`.
 
-## Query Capabilities
+**Important:** `initialize()` creates tables and indexes; for production D1
+deployments, run this from a provisioning/migration step rather than every
+request. Batches are atomic *per group*, not across an arbitrarily large input.
 
-### ✅ Native Support
-- **Primitive Fields**: String, Number, Boolean, Null.
-- **Dates**: Built-in support for date range queries.
+### JSON → ArkType model CLI
 
-### ⚠️ Advanced Types (Queryable via json_extract)
-- **Sets/Maps**: Stored as JSON arrays/entries.
-- **BigInt**: Stored as strings.
+Infer a model at **build time** from JSON samples. Generated TypeScript is
+checked in and reviewed like any other schema; it isn't regenerated on every
+Worker request.
 
-## Relational Data (Joins)
+```bash
+npm run infer -- --input prices.json --out src/generated/instance.ts --name Instance
+npm run infer -- --input api.json --path data.instances --out src/generated/instance.ts --name Instance
+npm run infer -- --input large.ndjson --out src/generated/instance.ts --sample 2000
+```
 
-SuperSQLite supports relational modeling by using indexed foreign key fields. While data is stored as JSON, you can perform efficient joins in application logic or via native SQL.
+CLI options: `--input/-i` (JSON file, NDJSON file or `-` for JSON stdin),
+`--out/-o`, `--name`, `--path` (dot-separated envelope path for JSON),
+`--sample` (default: first 1,000 records; `0` means all records).
 
-See `src/benchmark.ts` for a complete example of joins across Users, Products, and Orders using indexed lookups.
+- Infers nested objects, arrays, optional fields and primitive unions.
+- Empty arrays become `unknown[]`; unions of structurally incompatible
+  objects fall back to `unknown`. Verify generated models before use.
+- Does **not** guess semantic formats like dates from strings.
+- NDJSON is sampled incrementally. Ordinary JSON is fully parsed into memory
+  before sampling, so convert very large datasets to NDJSON if needed.
+- Input fields are kept in the inferred schema. For a smaller persisted model,
+  edit the generated schema and use ArkType's undeclared-key handling explicitly.
+
+### Rich types and queries
+
+`SuperJSON` round-trips `Date`, `Map`, `Set`, `BigInt`, and other supported
+types. Scalar fields are queryable with `json_extract` and can be indexed.
+For rich types, query only their serialized representation where it makes
+sense; for instance, dates compare as ISO timestamps.
+
+```ts
+const results = await instances.select().where({ provider: 'oci' }).all();
+const record = await instances.findById('a');
+const joined = await instances.leftJoin(otherRepo, { id: 'instanceId' }).select().all();
+```
+
+Schema validation, including ArkType morphs, occurs before insert; **the
+validated/transformed result is persisted**, not the unvalidated input.
+
+**Caveat:** Schema-less documents don't give you native relational foreign-key
+constraints or column-level SQL typing. Expression indexes are appropriate for
+a bounded set of frequently queried fields. For many joins or structured SQL
+queries, consider ordinary Drizzle tables instead.
+
+## Development
+
+```bash
+npm run typecheck
+npm test
+npm run ecommerce:seed
+npm run ecommerce:bench
+```
+
+The tests exercise native SQLite, the D1 adapter with a D1-compatible mock,
+joins, optional fields, serialized rich types, morph persistence, batch
+rollback and JSON/NDJSON inference. A deployed Cloudflare D1 integration test
+is not included.

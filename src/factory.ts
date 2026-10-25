@@ -1,241 +1,226 @@
 import { type, type Type } from 'arktype';
 import superjson from 'superjson';
-import { sqliteTable, text } from 'drizzle-orm/sqlite-core';
-import { type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { sql, eq, and } from 'drizzle-orm';
+import { sql, eq, and, isNull, type SQL, type SQLWrapper } from 'drizzle-orm';
+import { sqliteTable, text, SQLiteSyncDialect } from 'drizzle-orm/sqlite-core';
 import { ulid } from 'ulid';
+import type { SQLiteAdapter, SqlStatement, SqlRow } from './adapters/types.js';
 
-export function arktypeJsonTable<T extends Type<any>>(
-    typeName: string,
-    schema: T,
-    tableName: string,
-    db: BetterSQLite3Database,
-    indexFields: string[] = []
-) {
-    type DataType = T['infer'];
+const dialect = new SQLiteSyncDialect();
+const BATCH_SIZE = 100;
 
-    const rawTable = sqliteTable(tableName, {
-        id: text('id').primaryKey(),
-        data: text('data').notNull(),
-    });
+function identifier(name: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new Error(`Invalid SQL identifier: ${name}`);
+  }
+  return name;
+}
 
-    const proxy: any = new Proxy({}, {
-        get: (_, prop) => {
-            if (prop === 'id') return rawTable.id;
-            if (prop === '_raw') return rawTable.data;
-            if (prop === '_rawTable') return rawTable;
+function statement(fragment: SQL): SqlStatement {
+  const compiled = dialect.sqlToQuery(fragment);
+  return { sql: compiled.sql, params: compiled.params };
+}
 
-            // Strictly block all non-string or internal keys
-            if (typeof prop !== 'string' ||
-                prop.startsWith('_') ||
-                prop === 'then' ||
-                prop === 'constructor' ||
-                prop === 'toJSON' ||
-                prop === 'toString' ||
-                prop === 'decoder' ||
-                prop === 'shouldInlineParams' ||
-                prop === 'usedTables' ||
-                prop === 'queryChunks'
-            ) {
-                return undefined;
-            }
-            return sql`json_extract(${rawTable.data}, ${sql.raw(`'$.json.${prop}'`)})`;
-        }
-    });
+type Filter = Record<string, unknown> | SQL;
+type Projection = Record<string, boolean>;
 
-    const deserialize = (row: any): any => {
-        if (!row) return null;
-        // Handle JOINed results: { tableA: { id, data }, tableB: { id, data } }
-        if (typeof row === 'object' && !row.data && row.constructor === Object) {
-            const out: any = {};
-            for (const [k, v] of Object.entries(row)) {
-                if (v && typeof v === 'object' && (v as any).data) {
-                    const base = superjson.parse<any>((v as any).data);
-                    out[k] = { id: (v as any).id, ...base };
-                } else {
-                    out[k] = v;
-                }
-            }
-            return out;
-        }
-        // Handle single table results: { id, data }
-        if (row && typeof row === 'object' && row.data) {
-            const base = superjson.parse<DataType>(row.data);
-            return { id: row.id, ...base };
-        }
-        return row;
-    };
-
-    function isPlainObject(obj: any) {
-        return obj && typeof obj === 'object' && obj.constructor === Object && !obj._isSql && !obj.params;
-    }
-
-    function wrapQuery(query: any) {
-        const originalWhere = query.where.bind(query);
-        const originalAll = query.all.bind(query);
-        const originalGet = query.get.bind(query);
-
-        query.where = (condition: any) => {
-            if (isPlainObject(condition)) {
-                const clauses = Object.entries(condition).map(([k, v]) => {
-                    const column = proxy[k];
-                    return eq(column, v);
-                });
-                const finalCondition = clauses.length > 1 ? and(...clauses) : clauses[0];
-                return wrapQuery(originalWhere(finalCondition));
-            }
-            return wrapQuery(originalWhere(condition));
-        };
-
-        query.all = () => originalAll().map(deserialize);
-        query.get = () => deserialize(originalGet());
-
-        return query;
-    }
-
-    function createJoinBuilder(
-        db: BetterSQLite3Database,
-        baseTableName: string,
-        baseProxy: any,
-        baseTable: any
-    ) {
-        const joins: any[] = [];
-        const involvedProxies: Record<string, any> = { [baseTableName]: baseProxy };
-
-        const builder: any = {
-            join(otherRepo: any, fieldMap: Record<string, string>, type: 'inner' | 'left' = 'inner') {
-                joins.push({ otherRepo, fieldMap, type });
-                involvedProxies[otherRepo.tableName] = otherRepo.proxy;
-                return builder;
-            },
-
-            leftJoin(otherRepo: any, fieldMap: Record<string, string>) {
-                return builder.join(otherRepo, fieldMap, 'left');
-            },
-
-            select(selection?: any) {
-                let selectMap: any = selection;
-                if (!selectMap) {
-                    selectMap = {};
-                    Object.entries(involvedProxies).forEach(([name, p]) => {
-                        selectMap[name] = { id: p.id, data: p._raw };
-                    });
-                }
-
-                let query = db.select(selectMap).from(baseTable);
-
-                joins.forEach(j => {
-                    const onClauses = Object.entries(j.fieldMap).map(([local, remote]) => {
-                        return eq(baseProxy[local as any], j.otherRepo.proxy[remote as any]);
-                    });
-                    const joinFn = j.type === 'inner' ? query.innerJoin.bind(query) : query.leftJoin.bind(query);
-                    (query as any) = joinFn(j.otherRepo.table, onClauses.length > 1 ? and(...onClauses) : onClauses[0]);
-                });
-
-                const wrapped = wrapQuery(query);
-
-                const originalWhere = wrapped.where.bind(wrapped);
-                wrapped.where = (condition: any) => {
-                    if (isPlainObject(condition)) {
-                        const clauses: any[] = [];
-
-                        const buildClauses = (obj: any, currentProxy: any) => {
-                            Object.entries(obj).forEach(([key, val]) => {
-                                if (involvedProxies[key] && isPlainObject(val)) {
-                                    buildClauses(val, involvedProxies[key]);
-                                } else {
-                                    const col = currentProxy[key];
-                                    if (col && typeof col !== 'function' && !col.then) {
-                                        clauses.push(eq(col, val));
-                                    }
-                                }
-                            });
-                        };
-
-                        buildClauses(condition, baseProxy);
-
-                        if (clauses.length === 0) return wrapped;
-                        const finalCondition = clauses.length > 1 ? and(...clauses) : clauses[0];
-                        return wrapQuery(originalWhere(finalCondition));
-                    }
-                    return wrapQuery(originalWhere(condition));
-                };
-
-                return wrapped;
-            },
-
-            where: (condition: any) => {
-                return builder.select().where(condition);
-            }
-        };
-
-        return builder;
-    }
-
+function query<T>(adapter: SQLiteAdapter, base: SQL, decode: (row: SqlRow) => T, filter: (condition: Filter) => SQL | undefined) {
+  function withWhere(current: SQL) {
     return {
-        table: rawTable,
-        proxy,
-        tableName,
-
-        initialize: async () => {
-            db.run(sql.raw(`
-                CREATE TABLE IF NOT EXISTS ${tableName} (
-                  id TEXT PRIMARY KEY,
-                  data TEXT NOT NULL
-                )
-            `));
-
-            for (const key of indexFields) {
-                db.run(sql.raw(`
-                    CREATE INDEX IF NOT EXISTS idx_${tableName}_${key} 
-                    ON ${tableName}(json_extract(data, '$.json.${key}'))
-                `));
-            }
-        },
-
-        insert: (values: DataType | DataType[]): any => {
-            const arr = Array.isArray(values) ? values : [values];
-            const resultItems: any[] = [];
-            const rows = arr.map(v => {
-                const out = schema(v);
-                if (out instanceof type.errors) throw new Error(`Validation Error: ${out.summary}`);
-                const id = (v as any).id || ulid();
-                resultItems.push({ id, ...v });
-                return { id, data: superjson.stringify(v) };
-            });
-            if (rows.length === 0) return [];
-            db.insert(rawTable).values(rows).run();
-            return Array.isArray(values) ? resultItems : resultItems[0];
-        },
-
-        select: (selection?: Record<string, boolean>) => {
-            let selectMap: any = { id: rawTable.id, data: rawTable.data };
-            if (selection) {
-                selectMap = { id: rawTable.id };
-                Object.entries(selection).forEach(([k, v]) => {
-                    if (v) selectMap[k] = proxy[k];
-                });
-            }
-            return wrapQuery(db.select(selectMap).from(rawTable));
-        },
-
-        join(otherRepo: any, fieldMap: Record<string, string>) {
-            return createJoinBuilder(db, tableName, proxy, rawTable).join(otherRepo, fieldMap, 'inner');
-        },
-
-        leftJoin(otherRepo: any, fieldMap: Record<string, string>) {
-            return createJoinBuilder(db, tableName, proxy, rawTable).join(otherRepo, fieldMap, 'left');
-        },
-
-        findById: (id: string) => wrapQuery(db.select().from(rawTable)).where({ id }).get(),
-        findByField: (field: string, value: any) => wrapQuery(db.select().from(rawTable)).where({ [field]: value }).all(),
-        findDateRange: (field: string, options: { start?: Date; end?: Date }) => {
-            const column = proxy[field];
-            const conditions: any[] = [];
-            if (options.start) conditions.push(sql`${column} >= ${options.start.toISOString()}`);
-            if (options.end) conditions.push(sql`${column} <= ${options.end.toISOString()}`);
-            return wrapQuery(db.select().from(rawTable).where(and(...conditions))).all();
-        },
-        getAll: () => wrapQuery(db.select().from(rawTable)).all()
+      where(condition: Filter) {
+        const predicate = filter(condition);
+        return withWhere(predicate ? sql`${current} WHERE ${predicate}` : current);
+      },
+      async all(): Promise<T[]> {
+        return (await adapter.all(statement(current))).map(decode);
+      },
+      async get(): Promise<T | undefined> {
+        const row = await adapter.get(statement(sql`${current} LIMIT 1`));
+        return row === undefined ? undefined : decode(row);
+      }
     };
+  }
+  return withWhere(base);
+}
+
+/**
+ * ArkType is the single source of truth. Data is kept as SuperJSON,
+ * with expression indexes on explicitly selected fields.
+ */
+export function arktypeJsonTable<T extends Type<any>>(
+  typeName: string,
+  schema: T,
+  tableName: string,
+  adapter: SQLiteAdapter,
+  indexFields: string[] = []
+) {
+  type DataType = T['infer'];
+  identifier(tableName);
+  indexFields.forEach(identifier);
+
+  const rawTable = sqliteTable(tableName, {
+    id: text('id').primaryKey(),
+    data: text('data').notNull()
+  });
+
+  function field(column: string): SQL | SQLWrapper {
+    identifier(column);
+    if (column === 'id') return rawTable.id;
+    return sql`json_extract(${rawTable.data}, ${sql.raw(`'$.json.${column}'`)})`;
+  }
+
+  // Maintains the Drizzle expression API for advanced SQL queries.
+  const proxy = new Proxy({} as Record<string, any>, {
+    get(_, key) {
+      if (key === 'id') return rawTable.id;
+      if (key === '_raw') return rawTable.data;
+      if (key === '_rawTable') return rawTable;
+      if (typeof key !== 'string' || ['then', 'constructor', 'toJSON', 'toString'].includes(key) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return undefined;
+      return field(key);
+    }
+  });
+
+  function decode(row: SqlRow): DataType {
+    const parsed = superjson.parse<DataType>(String(row.data));
+    return { ...parsed, id: String(row.id) };
+  }
+
+  function whereFilter(condition: Filter, defaultProxy: typeof proxy = proxy, involved?: Record<string, typeof proxy>): SQL | undefined {
+    if (condition instanceof Object && 'queryChunks' in condition) return condition as SQL;
+    const predicates: SQL[] = [];
+    const walk = (values: Record<string, unknown>, currentProxy: typeof proxy) => {
+      for (const [key, value] of Object.entries(values)) {
+        if (involved?.[key] && value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+          walk(value as Record<string, unknown>, involved[key]);
+        } else {
+          const column = currentProxy[key];
+          if (!column) throw new Error(`Invalid query field: ${key}`);
+          predicates.push(value == null
+            ? isNull(column as any)
+            : eq(column as any, value instanceof Date ? value.toISOString() : value as any));
+        }
+      }
+    };
+    walk(condition as Record<string, unknown>, defaultProxy);
+    return predicates.length > 0 ? and(...predicates) : undefined;
+  }
+
+  function select(selection?: Projection) {
+    const selected = selection
+      ? [sql`${rawTable.id} AS ${sql.identifier('id')}`,
+        ...Object.keys(selection).filter(k => selection[k]).map(k =>
+          sql`${field(k)} AS ${sql.identifier(k)}`)]
+      : [sql`${rawTable.id} AS ${sql.identifier('id')}`, sql`${rawTable.data} AS ${sql.identifier('data')}`];
+    const base = sql`SELECT ${sql.join(selected, sql`, `)} FROM ${rawTable}`;
+    return query(adapter, base, selection ? (row => row as DataType) : decode, c => whereFilter(c));
+  }
+
+  type Join = { repo: { tableName: string; table: typeof rawTable; proxy: typeof proxy }; type: 'inner' | 'left'; fields: Record<string, string> };
+
+  function createJoinBuilder(joins: Join[] = []) {
+    const builder = {
+      join(otherRepo: any, fields: Record<string, string>, joinType: 'inner' | 'left' = 'inner') {
+        if (otherRepo.tableName === tableName || joins.some(j => j.repo.tableName === otherRepo.tableName)) {
+          throw new Error('Joined table names must be unique');
+        }
+        return createJoinBuilder([...joins, { repo: otherRepo, fields, type: joinType }]);
+      },
+      leftJoin(otherRepo: any, fields: Record<string, string>) {
+        return builder.join(otherRepo, fields, 'left');
+      },
+      select(selection?: Record<string, any>) {
+        const repos = [{ tableName, table: rawTable, proxy }, ...joins.map(j => j.repo)];
+        const columns = selection
+          ? Object.entries(selection).map(([key, expression]) => sql`${expression} AS ${sql.identifier(identifier(key))}`)
+          : repos.flatMap(r => [
+            sql`${r.table.id} AS ${sql.identifier(r.tableName + '__id')}`,
+            sql`${r.table.data} AS ${sql.identifier(r.tableName + '__data')}`
+          ]);
+        const parts: SQL[] = [sql`SELECT ${sql.join(columns, sql`, `)} FROM ${rawTable}`];
+        for (const join of joins) {
+          const pairs = Object.entries(join.fields).map(([local, remote]) => eq(
+            proxy[local] as any, join.repo.proxy[remote] as any
+          ));
+          if (!pairs.length) throw new Error('Join requires at least one field pair');
+          const joinKind = join.type === 'left' ? sql`LEFT JOIN` : sql`INNER JOIN`;
+          parts.push(sql` ${joinKind} ${join.repo.table} ON ${and(...pairs)}`);
+        }
+        const involved = Object.fromEntries(repos.map(r => [r.tableName, r.proxy]));
+        const decodeJoin = (row: SqlRow) => {
+          if (selection) return row;
+          const result: Record<string, unknown> = {};
+          for (const r of repos) {
+            const data = row[r.tableName + '__data'];
+            result[r.tableName] = data == null ? null : {
+              ...superjson.parse<Record<string, unknown>>(String(data)),
+              id: row[r.tableName + '__id']
+            };
+          }
+          return result;
+        };
+        return query(adapter, sql.join(parts, sql``), decodeJoin, c => whereFilter(c, proxy, involved));
+      },
+      where(condition: Filter) {
+        return builder.select().where(condition);
+      }
+    };
+    return builder;
+  }
+
+  return {
+    table: rawTable,
+    proxy,
+    tableName,
+    typeName,
+
+    async initialize(): Promise<void> {
+      await adapter.run({ sql: `CREATE TABLE IF NOT EXISTS "${tableName}" (id TEXT PRIMARY KEY, data TEXT NOT NULL)` });
+      for (const key of indexFields) {
+        await adapter.run({ sql: `CREATE INDEX IF NOT EXISTS "idx_${tableName}_${key}" ON "${tableName}" (json_extract(data, '$.json.${key}'))` });
+      }
+    },
+
+    async insert(values: DataType | DataType[]): Promise<any> {
+      const arr = Array.isArray(values) ? values : [values];
+      const stored = arr.map(value => {
+        const result = schema(value);
+        if (result instanceof type.errors) throw new Error(`Validation Error: ${result.summary}`);
+        const validated = result as DataType; // Persist the validated/transformed value, not input!
+        const suppliedId = (validated as { id?: unknown }).id;
+        const id = typeof suppliedId === 'string' && suppliedId.length > 0 ? suppliedId : ulid();
+        return { id, data: superjson.stringify(validated), value: { ...validated, id } };
+      });
+      for (let i = 0; i < stored.length; i += BATCH_SIZE) {
+        const chunk = stored.slice(i, i + BATCH_SIZE);
+        await adapter.batch(chunk.map(({ id, data }) => ({
+          sql: `INSERT INTO "${tableName}" (id, data) VALUES (?, ?)`,
+          params: [id, data]
+        })));
+      }
+      const result = stored.map(v => v.value);
+      return Array.isArray(values) ? result : result[0];
+    },
+
+    select,
+    join: (otherRepo: any, fields: Record<string, string>) => createJoinBuilder().join(otherRepo, fields),
+    leftJoin: (otherRepo: any, fields: Record<string, string>) => createJoinBuilder().leftJoin(otherRepo, fields),
+
+    async findById(id: string): Promise<DataType | undefined> {
+      return select().where({ id }).get();
+    },
+    async findByField(fieldName: string, value: unknown): Promise<DataType[]> {
+      return select().where({ [fieldName]: value }).all();
+    },
+    async findDateRange(fieldName: string, options: { start?: Date; end?: Date }): Promise<DataType[]> {
+      const expr = field(fieldName);
+      const predicates: SQL[] = [];
+      if (options.start) predicates.push(sql`${expr} >= ${options.start.toISOString()}`);
+      if (options.end) predicates.push(sql`${expr} <= ${options.end.toISOString()}`);
+      return predicates.length
+        ? select().where(and(...predicates)!).all()
+        : select().all();
+    },
+    async getAll(): Promise<DataType[]> {
+      return select().all();
+    }
+  };
 }

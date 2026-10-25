@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { BetterSQLite3Adapter } from './adapters/better-sqlite3.js';
 import { arktypeJsonTable } from './factory.js';
 import { faker } from '@faker-js/faker';
 import { User, Product, Order, OrderItem } from './ecommerce-schemas.js';
@@ -7,7 +7,7 @@ import type { User as UserType, Product as ProductType, Order as OrderType, Orde
 
 // Create persistent database
 const sqlite = new Database('ecommerce-benchmark.db');
-const db = drizzle(sqlite);
+const db = new BetterSQLite3Adapter(sqlite);
 
 // Create repos with indexes
 const userRepo = arktypeJsonTable('User', User, 'users', db, ['username', 'email']);
@@ -51,7 +51,7 @@ async function seed() {
         email: faker.internet.email(),
         createdAt: faker.date.past()
     }));
-    users.forEach(u => userRepo.insert(u));
+    await userRepo.insert(users);
     console.log(`✅ ${NUM_USERS.toLocaleString()} users in ${(performance.now() - userStart).toFixed(0)}ms\n`);
 
     // Seed products
@@ -66,7 +66,7 @@ async function seed() {
         inStock: faker.datatype.boolean(0.85),
         createdAt: faker.date.recent()
     }));
-    products.forEach(p => productRepo.insert(p));
+    await productRepo.insert(products);
     console.log(`✅ ${NUM_PRODUCTS.toLocaleString()} products in ${(performance.now() - prodStart).toFixed(0)}ms\n`);
 
     // Seed orders and items together to calculate totals correctly
@@ -76,6 +76,8 @@ async function seed() {
     const statuses: Array<'pending' | 'shipped' | 'delivered' | 'cancelled'> =
         ['pending', 'shipped', 'delivered', 'cancelled'];
 
+    const pendingOrders: OrderType[] = [];
+    const pendingItems: OrderItemType[] = [];
     for (let i = 0; i < NUM_ORDERS; i++) {
         const numItems = faker.number.int({ min: 1, max: 4 });
         const user = faker.helpers.arrayElement(users);
@@ -98,7 +100,7 @@ async function seed() {
         }
 
         // Insert Order WITH the calculated total
-        orderRepo.insert({
+        pendingOrders.push({
             id: orderId,
             userId: user.id,
             status: faker.helpers.arrayElement(statuses),
@@ -107,10 +109,16 @@ async function seed() {
         });
 
         // Insert items
-        orderItems.forEach(item => orderItemRepo.insert(item));
+        pendingItems.push(...orderItems);
+        if (pendingOrders.length >= 100) {
+            await orderRepo.insert(pendingOrders.splice(0));
+            await orderItemRepo.insert(pendingItems.splice(0));
+        }
 
         if ((i + 1) % 10000 === 0) console.log(`   ...processed ${i + 1} orders`);
     }
+    if (pendingOrders.length) await orderRepo.insert(pendingOrders);
+    if (pendingItems.length) await orderItemRepo.insert(pendingItems);
     console.log(`✅ ${NUM_ORDERS.toLocaleString()} orders and ${itemCount.toLocaleString()} items in ${(performance.now() - shopStart).toFixed(0)}ms\n`);
 
     const totalTime = performance.now() - totalStart;

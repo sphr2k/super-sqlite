@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { drizzle } from 'drizzle-orm/better-sqlite3';
+import { BetterSQLite3Adapter } from './adapters/better-sqlite3.js';
 
-const sqlite = new Database('sqlite.db');
-export const db = drizzle(sqlite);
+export const sqlite = new Database('sqlite.db');
+export const db = new BetterSQLite3Adapter(sqlite);

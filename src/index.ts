@@ -32,7 +32,7 @@ async function main() {
 
     console.log("\n📝 Inserting data using flat objects (Auto-SuperJSON)...");
     try {
-        const newUser = usersRepo.insert({
+        const newUser = await usersRepo.insert({
             name: "Alice Dev",
             email: "alice@example.com",
             status: "pending",
@@ -40,13 +40,13 @@ async function main() {
             roles: new Set(["admin", "editor"])
         }) as any;
 
-        profilesRepo.insert({
+        await profilesRepo.insert({
             userId: newUser.id,
             bio: "Building the future with SuperSQLite",
             website: "https://github.com/jan-werner/supersqlite"
         });
 
-        usersRepo.insert({
+        await usersRepo.insert({
             name: "NoProfile Bob",
             email: "bob@example.com",
             status: "active",
@@ -56,7 +56,7 @@ async function main() {
 
         console.log("\n✨ PERFECT DX: Fluent Select + Object Where Filters");
         // Magical partial selection + magical object-based where clause!
-        const activeUsers = usersRepo.select({ name: true, email: true })
+        const activeUsers = await usersRepo.select({ name: true, email: true })
             .where({ status: "active" })
             .all();
 
@@ -64,7 +64,7 @@ async function main() {
         activeUsers.forEach((u: any) => console.log(`   👤 ${u.name} <${u.email}>`));
 
         console.log("\n🔗 MAGIC JOIN: Users with Profiles");
-        const usersWithProfiles = usersRepo.leftJoin(profilesRepo, { id: 'userId' })
+        const usersWithProfiles = await usersRepo.leftJoin(profilesRepo, { id: 'userId' })
             .select()
             .all();
 
@@ -77,7 +77,7 @@ async function main() {
         });
 
         console.log("\n🎯 NESTED FILTER: Users with specific Bio");
-        const filteredJoins = usersRepo.join(profilesRepo, { id: 'userId' })
+        const filteredJoins = await usersRepo.join(profilesRepo, { id: 'userId' })
             .where({ profiles: { bio: "Building the future with SuperSQLite" } })
             .all();
 
@@ -90,7 +90,7 @@ async function main() {
         yesterday.setDate(yesterday.getDate() - 1);
 
         // findDateRange still works and uses the proxy internally
-        const recentUsers = usersRepo.findDateRange("createdAt", { start: yesterday });
+        const recentUsers = await usersRepo.findDateRange("createdAt", { start: yesterday });
         console.log(`✅ Found ${recentUsers.length} users created since ${yesterday.toISOString()}`);
 
     } catch (e: any) {
