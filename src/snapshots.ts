@@ -55,6 +55,8 @@ export function createSnapshotStore<T extends Type<any>>(name: string, schema: T
   const batches = `"${name}_batches"`;
   const heads = `"${name}_heads"`;
   const batchIndex = `"idx_${name}_documents_batch"`;
+  const kindIndex = `"idx_${name}_documents_batch_kind"`;
+  const kindExpr = "json_extract(data, '$.json.value.kind')";
   const batchExpr = "json_extract(data, '$.json.batchId')";
   type Value = T['infer'];
 
@@ -84,6 +86,9 @@ export function createSnapshotStore<T extends Type<any>>(name: string, schema: T
     async initialize(): Promise<void> {
       await adapter.run({ sql: `CREATE TABLE IF NOT EXISTS ${records} (id TEXT PRIMARY KEY, data TEXT NOT NULL)` });
       await adapter.run({ sql: `CREATE INDEX IF NOT EXISTS ${batchIndex} ON ${records} (${batchExpr})` });
+      // Efficient materialized views: one snapshot can contain raw and derived
+      // documents without scanning raw rows on every read.
+      await adapter.run({ sql: `CREATE INDEX IF NOT EXISTS ${kindIndex} ON ${records} (${batchExpr}, ${kindExpr})` });
       await adapter.run({ sql: `CREATE TABLE IF NOT EXISTS ${batches} (
         id TEXT PRIMARY KEY, namespace TEXT NOT NULL, digest TEXT NOT NULL,
         expected_rows INTEGER NOT NULL, parent_batch_id TEXT, started_at TEXT NOT NULL
@@ -235,16 +240,20 @@ export function createSnapshotStore<T extends Type<any>>(name: string, schema: T
       };
     },
 
-    async readBatchPage(batchId: string, options: { limit?: number; cursor?: string } = {}):
+    async readBatchPage(batchId: string, options: { limit?: number; cursor?: string; kind?: string } = {}):
       Promise<SnapshotPage<Value>> {
       const limit = options.limit ?? 200;
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) {
         throw new RangeError('Page limit must be 1..500');
       }
+      if (options.kind !== undefined) ensureText(options.kind, 'kind');
       const rows = await adapter.all<{ id: string; data: string }>({
         sql: `SELECT id, data FROM ${records}
-          WHERE ${batchExpr} = ? AND id > ? ORDER BY id LIMIT ?`,
-        params: [batchId, options.cursor ?? '', limit + 1]
+          WHERE ${batchExpr} = ? ${options.kind === undefined ? '' : `AND ${kindExpr} = ?`}
+            AND id > ? ORDER BY id LIMIT ?`,
+        params: options.kind === undefined
+          ? [batchId, options.cursor ?? '', limit + 1]
+          : [batchId, options.kind, options.cursor ?? '', limit + 1]
       });
       const sliced = rows.slice(0, limit);
       return {
@@ -254,7 +263,7 @@ export function createSnapshotStore<T extends Type<any>>(name: string, schema: T
       };
     },
 
-    async readActivePage(namespace: string, options: { limit?: number; cursor?: string } = {}):
+    async readActivePage(namespace: string, options: { limit?: number; cursor?: string; kind?: string } = {}):
       Promise<SnapshotPage<Value>> {
       const active = await this.head(namespace);
       if (!active) return { batchId: null, documents: [], nextCursor: null };

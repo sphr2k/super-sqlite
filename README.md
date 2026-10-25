@@ -329,3 +329,9 @@ rich types, morph persistence, batch rollback, chained filters, schema
 upcasting, CAS conflicts, index planning, compile-time type regression
 assertions and JSON/NDJSON inference. A deployed Cloudflare D1 integration
 test is not included.
+
+Snapshot pages accept an optional indexed string discriminator via
+`readBatchPage(batchId, { kind: 'offer', limit: 200 })` and
+`readActivePage(namespace, { kind: 'offer' })`. A composite JSON1 index
+on `(batchId, value.kind)` allows raw and materialized records in one
+atomic snapshot without querying the raw rows for public views.
