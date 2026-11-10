@@ -11,7 +11,11 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "declaration": true
+    "declaration": true,
+    "rootDir": "./src",
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "src/**/*"

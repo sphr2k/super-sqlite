@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import { type } from 'arktype';
 import Database from 'better-sqlite3';
 import superjson from 'superjson';

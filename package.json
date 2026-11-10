@@ -1,19 +1,23 @@
 {
   "name": "supersqlite",
   "version": "1.0.0",
-  "description": "SuperJSON-powered SQLite with ArkType-enforced schemas and expression indexes",
+  "description": "Typed JSON documents on SQLite with SuperJSON, typed schemas and indexes",
   "main": "./dist/index.js",
   "scripts": {
-    "test": "npx vitest run",
-    "start": "npm run build && node dist/demo.js",
-    "ecommerce:seed": "npx tsc && node dist/seed-benchmark.js",
-    "ecommerce:bench": "npx tsc && node dist/benchmark.js",
-    "typecheck": "tsc --noEmit",
-    "infer": "tsx src/cli.ts infer",
+    "test": "vp test",
+    "start": "bun run build && node dist/demo.js",
+    "ecommerce:seed": "bun run build && node dist/seed-benchmark.js",
+    "ecommerce:bench": "bun run build && node dist/benchmark.js",
+    "typecheck": "bun check",
+    "infer": "vp exec src/cli.ts infer",
     "build": "tsc",
     "smoke": "node scripts/package-smoke.mjs",
-    "bench:projection": "npm run build && node benchmarks/projections.mjs",
-    "prepare": "npm run build"
+    "bench:projection": "bun run build && node benchmarks/projections.mjs",
+    "prepare": "npm run build",
+    "lint": "vp lint",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
+    "verify": "bun check && vp lint"
   },
   "keywords": [],
   "author": "",
@@ -27,15 +31,16 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261025.1",
+    "@faker-js/faker": "^10.2.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.10",
+    "better-sqlite3": "^12.6.2",
     "drizzle-kit": "^0.31.8",
     "miniflare": "^4.20260730.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
-    "vitest": "^4.0.18",
-    "better-sqlite3": "^12.6.2",
-    "@faker-js/faker": "^10.2.0"
+    "typescript": "7.0.2",
+    "vite-plus": "1.5.1",
+    "zod": "^4.6"
   },
   "bin": {
     "super-sqlite": "./dist/cli.js"
@@ -73,14 +78,39 @@
       "types": "./dist/adapters/better-sqlite3.d.ts",
       "default": "./dist/adapters/better-sqlite3.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./do": {
+      "types": "./dist/durable-object.d.ts",
+      "default": "./dist/durable-object.js"
+    },
+    "./adapters/durable-object": {
+      "types": "./dist/adapters/durable-object.d.ts",
+      "default": "./dist/adapters/durable-object.js"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "default": "./dist/core.js"
+    },
+    "./zod": {
+      "types": "./dist/zod.d.ts",
+      "default": "./dist/zod.js"
+    }
   },
   "peerDependencies": {
-    "better-sqlite3": "^12.6.2"
+    "better-sqlite3": "^12.6.2",
+    "zod": "^4.6"
   },
   "peerDependenciesMeta": {
     "better-sqlite3": {
       "optional": true
+    },
+    "zod": {
+      "optional": true
     }
-  }
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.1",
+    "@jridgewell/sourcemap-codec": "1.6.0"
+  },
+  "packageManager": "bun@1.4.3"
 }

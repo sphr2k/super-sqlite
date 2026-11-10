@@ -335,3 +335,98 @@ Snapshot pages accept an optional indexed string discriminator via
 `readActivePage(namespace, { kind: 'offer' })`. A composite JSON1 index
 on `(batchId, value.kind)` allows raw and materialized records in one
 atomic snapshot without querying the raw rows for public views.
+
+## Portable schema providers (ArkType and Zod 4)
+
+Existing `arktypeJsonTable(...)` consumers keep their API. Core document persistence
+is validator-neutral; validation is passed through an explicit `DocumentSchema`
+adapter. Field metadata for JSON1 predicates/indexes is independent of the
+validator's internal AST.
+
+A Zod application can use the optional provider subpath without importing ArkType:
+
+```ts
+import * as z from 'zod';
+import { documentTable, zodSchema } from 'supersqlite/zod';
+import { DurableObjectAdapter } from 'supersqlite/do';
+
+const Bookmark = z.strictObject({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  tags: z.array(z.string()).default([]),
+});
+const makeBookmarks = (storage: DurableObjectStorage) =>
+  documentTable('Bookmark', zodSchema(Bookmark, {
+    fields: {
+      id: { kind: 'string' },
+      title: { kind: 'string' },
+      description: { kind: 'string' },
+      tags: { kind: 'string-array' },
+    },
+  }), 'bookmarks', new DurableObjectAdapter(storage), ['title'], {
+    indexes: {
+      fullText: { fields: ['title', 'description'], weights: [3, 1] },
+      arrays: ['tags'],
+    },
+  });
+
+const bookmarks = makeBookmarks(ctx.storage);
+await bookmarks.initialize(); // provision/migration, not on each request
+await bookmarks.insert({ id: '1', title: 'SQLite on Workers', description: '', tags: ['cloudflare'] });
+const matches = await bookmarks.searchFullText('Workers');
+const tagged = await bookmarks.findByArray('tags', ['cloudflare']);
+const counts = await bookmarks.arrayCounts('tags');
+```
+
+The `zod` package is an **optional peer dependency**; import from `supersqlite/zod`
+when needed. The standalone `supersqlite/core` module has no validator
+runtime dependency. **Important:** if a Zod input schema transforms values
+(e.g. string to number), provide an explicit `outputSchema` that validates the
+already-transformed stored representation. Persisted reads must never repeat
+input transforms. Optional/defaulted input fields that become required in
+output should also be represented correctly in that output schema.
+
+`supersqlite/do` uses `ctx.storage.sql.exec()` and synchronous
+`ctx.storage.transactionSync()` for atomic batches. Construct/provision the
+repository in the SQLite Durable Object initialization path, commonly via
+`ctx.blockConcurrencyWhile(...)`. Backends are local `better-sqlite3`,
+Cloudflare D1, or SQLite-backed Durable Objects.
+
+### Derived SQLite indexes
+
+- FTS5 is a declared, ranked, text index maintained by SQLite triggers. Its
+  `searchFullText(query, { limit })` uses `MATCH` and `bm25`, and supports
+  tokenizer `unicode61` (default) or `porter`.
+- String-array relations materialize `string[]` document fields into indexed
+  `(document_id, value)` pairs. Use `findByArray(field, values, { mode: 'all'|'any' })`
+  or `arrayCounts(field)`. Duplicate array values are deduplicated. The JSON
+  document remains the source of truth.
+- Insert/update/delete triggers atomically maintain derived indexes, including
+  changes under revision-CAS. Older documents are backfilled at provisioning.
+- `planDerivedIndexes()` is read-only; `applyDerivedIndexes()` refuses changed
+  managed definitions unless explicitly allowed. `rebuildDerivedIndexes()`
+  reindexes persisted documents. Metadata is kept in a SQLite table, not
+  `PRAGMA user_version`.
+- Derivative index definitions use simple top-level fields. Avoid silently
+  querying lazily-upcast legacy field names: run `upgradeDocuments()` before
+  indexing/querying fields renamed by schema evolution.
+
+### Development
+
+Use Bun 1.4.3, TypeScript 7 and Vite+ 1.5:
+
+```sh
+bun install
+bun run typecheck  # bun check — native TS7 checker
+bun run lint       # Vite+ / Oxlint
+bun run format     # Vite+ / Oxfmt
+bun run test       # Vite+ / Vitest
+bun run build      # TS7 declaration/JS emit
+bun run smoke      # packed module entrypoint checks
+```
+
+Integration tests run *real local workerd D1* and a *bundled worker with a real
+SQLite Durable Object* via Miniflare, in addition to native SQLite. A separate
+linkding-compatible application would consume these primitives; this library
+is not the linkding API server itself.

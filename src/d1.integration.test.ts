@@ -1,5 +1,5 @@
 /// <reference types="@cloudflare/workers-types" />
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vite-plus/test';
 import { Miniflare } from 'miniflare';
 import { type } from 'arktype';
 import { arktypeJsonTable } from './factory.js';

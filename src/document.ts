@@ -1,5 +1,5 @@
-import { type, type Type } from 'arktype';
-import superjson from 'superjson';
+import type { DocumentSchema } from "./schema-port.js";
+import superjson from "superjson";
 
 export interface DocumentEvolution {
   /** Current logical document schema version, starting at 1. */
@@ -11,7 +11,7 @@ export interface DocumentEvolution {
 export class DocumentVersionError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'DocumentVersionError';
+    this.name = "DocumentVersionError";
   }
 }
 
@@ -27,38 +27,47 @@ export function serializeDocument(value: unknown, revision = 1, version = 1): st
   return JSON.stringify(envelope);
 }
 
-export function readDocument<T extends Type<any>>(
+export function readDocument<T extends { infer: any; inferIn: any }>(
   raw: string,
   schema: T,
   evolution?: DocumentEvolution,
-  rowId?: string
-): { document: T['infer']; revision: number; version: number } {
+  rowId?: string,
+): { document: T["infer"]; revision: number; version: number } {
   let envelope: Envelope;
-  try { envelope = JSON.parse(raw) as Envelope; }
-  catch (cause) { throw new DocumentVersionError(`Invalid stored JSON: ${String(cause)}`); }
-  if (!envelope || typeof envelope !== 'object' || !('json' in envelope)) {
-    throw new DocumentVersionError('Invalid SuperJSON document envelope');
+  try {
+    envelope = JSON.parse(raw) as Envelope;
+  } catch (cause) {
+    throw new DocumentVersionError(`Invalid stored JSON: ${String(cause)}`);
+  }
+  if (!envelope || typeof envelope !== "object" || !("json" in envelope)) {
+    throw new DocumentVersionError("Invalid SuperJSON document envelope");
   }
   const revision = envelope._supersqlite?.revision ?? 1;
   const version = envelope._supersqlite?.version ?? 1;
-  if (![revision, version].every(v => Number.isSafeInteger(v) && v >= 1)) {
-    throw new DocumentVersionError('Invalid stored SuperSQLite version metadata');
+  if (![revision, version].every((v) => Number.isSafeInteger(v) && v >= 1)) {
+    throw new DocumentVersionError("Invalid stored SuperSQLite version metadata");
   }
   const target = evolution?.version ?? 1;
-  if (!Number.isSafeInteger(target) || target < 1) throw new DocumentVersionError('Invalid target schema version');
-  if (version > target) throw new DocumentVersionError(`Stored document v${version} is newer than reader v${target}`);
+  if (!Number.isSafeInteger(target) || target < 1)
+    throw new DocumentVersionError("Invalid target schema version");
+  if (version > target)
+    throw new DocumentVersionError(`Stored document v${version} is newer than reader v${target}`);
   let document: unknown;
-  try { document = superjson.parse(raw); }
-  catch (cause) { throw new DocumentVersionError(`Invalid SuperJSON document: ${String(cause)}`); }
+  try {
+    document = superjson.parse(raw);
+  } catch (cause) {
+    throw new DocumentVersionError(`Invalid SuperJSON document: ${String(cause)}`);
+  }
   if (evolution) {
     for (let step = version; step < target; step++) {
       const upcaster = evolution.upcasters?.[step];
-      if (!upcaster) throw new DocumentVersionError(`Missing upcaster from document v${step} to v${step + 1}`);
+      if (!upcaster)
+        throw new DocumentVersionError(`Missing upcaster from document v${step} to v${step + 1}`);
       document = upcaster(document);
     }
   }
-  if (!document || typeof document !== 'object' || Array.isArray(document)) {
-    throw new DocumentVersionError('Stored document must be a JSON object');
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    throw new DocumentVersionError("Stored document must be a JSON object");
   }
   const values = document as Record<string, unknown>;
   if (rowId !== undefined) {
@@ -70,9 +79,25 @@ export function readDocument<T extends Type<any>>(
   }
   // Validate every read, regardless of whether evolution is configured.
   // Use output validation to avoid rerunning input morphs on persisted data.
-  const validated = schema.out(document);
-  if (validated instanceof type.errors) {
-      throw new DocumentVersionError(`Invalid document at v${target}: ${validated.summary}`);
+  let validated: T["infer"];
+  try {
+    if (typeof (schema as unknown as DocumentSchema<any, any>).parseOutput === "function") {
+      validated = (schema as unknown as DocumentSchema<any, any>).parseOutput(document);
+    } else {
+      // Legacy ArkType direct readDocument() support without importing its runtime.
+      const output = (schema as unknown as { out: (value: unknown) => unknown }).out(document);
+      if (
+        output &&
+        typeof output === "object" &&
+        "summary" in output &&
+        (output as { constructor?: { name?: string } }).constructor?.name === "ArkErrors"
+      ) {
+        throw new TypeError(String((output as { summary: unknown }).summary));
+      }
+      validated = output as T["infer"];
+    }
+  } catch (cause) {
+    throw new DocumentVersionError(`Invalid document at v${target}: ${String(cause)}`);
   }
-  return { document: validated as T['infer'], revision, version };
+  return { document: validated, revision, version };
 }
