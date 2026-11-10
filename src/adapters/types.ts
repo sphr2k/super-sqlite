@@ -14,9 +14,10 @@ export interface SQLiteAdapter {
 export function bindParams(params: readonly unknown[] = []): BindValue[] {
   return params.map((value) => {
     if (value == null) return null;
-    if (typeof value === 'boolean') return value ? 1 : 0;
+    if (typeof value === "boolean") return value ? 1 : 0;
     if (value instanceof Date) return value.toISOString();
-    if (typeof value === 'string' || typeof value === 'number' || value instanceof Uint8Array) return value;
+    if (typeof value === "string" || typeof value === "number" || value instanceof Uint8Array)
+      return value;
     throw new TypeError(`Unsupported SQLite bind parameter type: ${typeof value}`);
   });
 }

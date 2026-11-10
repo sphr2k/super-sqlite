@@ -1,4 +1,4 @@
-import { bindParams, type SQLiteAdapter, type SqlStatement, type SqlRow } from './types.js';
+import { bindParams, type SQLiteAdapter, type SqlStatement, type SqlRow } from "./types.js";
 
 /** Structural Cloudflare D1 types, avoiding a dependency on workers-types in Node builds. */
 export interface D1StatementLike {

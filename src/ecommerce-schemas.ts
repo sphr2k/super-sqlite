@@ -1,37 +1,37 @@
-import { type } from 'arktype';
+import { type } from "arktype";
 
 // Shared schema definitions for e-commerce demo and benchmarks
 
 export const User = type({
-    id: "string",
-    username: "string",
-    email: "string",
-    createdAt: type.instanceOf(Date)
+  id: "string",
+  username: "string",
+  email: "string",
+  createdAt: type.instanceOf(Date),
 });
 
 export const Product = type({
-    id: "string",
-    name: "string",
-    price: "number",
-    category: "'electronics' | 'books' | 'clothing'",
-    inStock: "boolean",
-    createdAt: type.instanceOf(Date)
+  id: "string",
+  name: "string",
+  price: "number",
+  category: "'electronics' | 'books' | 'clothing'",
+  inStock: "boolean",
+  createdAt: type.instanceOf(Date),
 });
 
 export const Order = type({
-    id: "string",
-    userId: "string",
-    status: "'pending' | 'shipped' | 'delivered' | 'cancelled'",
-    totalAmount: "number",
-    createdAt: type.instanceOf(Date)
+  id: "string",
+  userId: "string",
+  status: "'pending' | 'shipped' | 'delivered' | 'cancelled'",
+  totalAmount: "number",
+  createdAt: type.instanceOf(Date),
 });
 
 export const OrderItem = type({
-    id: "string",
-    orderId: "string",
-    productId: "string",
-    quantity: "number",
-    priceAtTime: "number"
+  id: "string",
+  orderId: "string",
+  productId: "string",
+  quantity: "number",
+  priceAtTime: "number",
 });
 
 // Type inference

@@ -22,32 +22,29 @@ npm start
 ```
 
 ```ts
-import Database from 'better-sqlite3';
-import { type } from 'arktype';
-import { arktypeJsonTable } from 'supersqlite';
-import { BetterSQLite3Adapter } from 'supersqlite/node';
+import Database from "better-sqlite3";
+import { type } from "arktype";
+import { arktypeJsonTable } from "supersqlite";
+import { BetterSQLite3Adapter } from "supersqlite/node";
 
-const sqlite = new Database(':memory:');
+const sqlite = new Database(":memory:");
 const db = new BetterSQLite3Adapter(sqlite);
 
 const Instance = type({
-  id: 'string',
-  provider: 'string',
-  vcpu: 'number',
-  'price?': 'number'
+  id: "string",
+  provider: "string",
+  vcpu: "number",
+  "price?": "number",
 });
 
-const instances = arktypeJsonTable('Instance', Instance, 'instances', db, [
-  'provider', 'vcpu'
-]);
+const instances = arktypeJsonTable("Instance", Instance, "instances", db, ["provider", "vcpu"]);
 await instances.initialize();
 await instances.insert([
-  { id: 'a', provider: 'oci', vcpu: 2, price: 1.5 },
-  { id: 'b', provider: 'aws', vcpu: 4 }
+  { id: "a", provider: "oci", vcpu: 2, price: 1.5 },
+  { id: "b", provider: "aws", vcpu: 4 },
 ]);
-const oci = await instances.findByField('provider', 'oci');
-const filtered = await instances.select({ provider: true, vcpu: true })
-  .where({ vcpu: 2 }).all();
+const oci = await instances.findByField("provider", "oci");
+const filtered = await instances.select({ provider: true, vcpu: true }).where({ vcpu: 2 }).all();
 ```
 
 ### Cloudflare D1
@@ -55,14 +52,14 @@ const filtered = await instances.select({ provider: true, vcpu: true })
 Bind a D1 database in your Worker as `DB`, then:
 
 ```ts
-import { D1Adapter } from 'supersqlite/d1';
-import { arktypeJsonTable } from 'supersqlite';
-import { Instance } from './generated/instance.js';
+import { D1Adapter } from "supersqlite/d1";
+import { arktypeJsonTable } from "supersqlite";
+import { Instance } from "./generated/instance.js";
 
 const db = new D1Adapter(env.DB);
-const instances = arktypeJsonTable('Instance', Instance, 'instances', db, ['provider']);
+const instances = arktypeJsonTable("Instance", Instance, "instances", db, ["provider"]);
 await instances.initialize();
-await instances.insert({ id: 'a', provider: 'oci', vcpu: 2 });
+await instances.insert({ id: "a", provider: "oci", vcpu: 2 });
 const rows = await instances.getAll();
 ```
 
@@ -73,7 +70,7 @@ statements so D1 never receives a single oversized `INSERT`.
 
 **Important:** `initialize()` creates tables and indexes; for production D1
 deployments, run this from a provisioning/migration step rather than every
-request. Batches are atomic *per group*, not across an arbitrarily large input.
+request. Batches are atomic _per group_, not across an arbitrarily large input.
 
 ### JSON → ArkType model CLI
 
@@ -108,9 +105,9 @@ For rich types, query only their serialized representation where it makes
 sense; for instance, dates compare as ISO timestamps.
 
 ```ts
-const results = await instances.select().where({ provider: 'oci' }).all();
-const record = await instances.findById('a');
-const joined = await instances.leftJoin(otherRepo, { id: 'instanceId' }).select().all();
+const results = await instances.select().where({ provider: "oci" }).all();
+const record = await instances.findById("a");
+const joined = await instances.leftJoin(otherRepo, { id: "instanceId" }).select().all();
 ```
 
 Schema validation, including ArkType morphs, occurs before insert; **the
@@ -139,8 +136,10 @@ For performance-sensitive **non-nullable scalar** projections, an explicitly
 weaker alternative is available:
 
 ```ts
-const results = await instances.selectScalar({ provider: true, vcpu: true })
-  .where({ provider: 'aws' }).all();
+const results = await instances
+  .selectScalar({ provider: true, vcpu: true })
+  .where({ provider: "aws" })
+  .all();
 ```
 
 `selectScalar()` fetches only the selected JSON1 fields, validates **those
@@ -156,27 +155,26 @@ hydration, **1.67 ms** for `selectScalar()` and **0.75 ms** for raw JSON1
 projection. This is an in-memory SQLite microbenchmark, not representative of
 Cloudflare D1 network behavior.
 
-
 ### Versioned schema evolution
 
 Models may evolve without altering the SQLite document table:
 
 ```ts
-const OldToNew = type({ id: 'string', region: 'string', enabled: 'boolean' });
-const regions = arktypeJsonTable('Region', OldToNew, 'regions', db, ['region'], {
+const OldToNew = type({ id: "string", region: "string", enabled: "boolean" });
+const regions = arktypeJsonTable("Region", OldToNew, "regions", db, ["region"], {
   evolution: {
     version: 2,
     upcasters: {
-      1: document => {
+      1: (document) => {
         const old = document as { id: string; location: string };
         return { id: old.id, region: old.location, enabled: true };
-      }
-    }
-  }
+      },
+    },
+  },
 });
 
 await regions.initialize();
-const current = await regions.findById('one'); // legacy v1 documents are upcast in memory
+const current = await regions.findById("one"); // legacy v1 documents are upcast in memory
 const plan = await regions.upgradeDocuments({ dryRun: true, batchSize: 100 });
 const result = await regions.upgradeDocuments({ batchSize: 100 });
 ```
@@ -201,11 +199,12 @@ documents written at a newer version.
 ### Safe updates and optimistic concurrency
 
 ```ts
-const snapshot = await regions.findByIdWithRevision('one');
+const snapshot = await regions.findByIdWithRevision("one");
 if (snapshot) {
-  const { value, revision } = await regions.update('one',
+  const { value, revision } = await regions.update(
+    "one",
     { enabled: false },
-    { expectedRevision: snapshot.revision }
+    { expectedRevision: snapshot.revision },
   );
 }
 ```
@@ -224,8 +223,8 @@ overwrite another writer.
 ### Declarative indexes
 
 ```ts
-const planned = await regions.planIndexes();  // read-only CREATE/DROP plan
-await regions.applyIndexes();                // add missing managed indexes
+const planned = await regions.planIndexes(); // read-only CREATE/DROP plan
+await regions.applyIndexes(); // add missing managed indexes
 await regions.applyIndexes({ dropObsolete: true }); // explicitly remove obsolete ones
 ```
 
@@ -270,25 +269,31 @@ Its separate metadata tables track pending batch sizes and atomically active
 heads. Both D1 and BetterSQLite3 share the same asynchronous API.
 
 ```ts
-import { type } from 'arktype';
-import { createSnapshotStore } from 'supersqlite';
-import { D1Adapter } from 'supersqlite/d1';
+import { type } from "arktype";
+import { createSnapshotStore } from "supersqlite";
+import { D1Adapter } from "supersqlite/d1";
 
-const store = createSnapshotStore('keeper', type({
-  country: 'string', raw: 'unknown', single: 'number | null'
-}), new D1Adapter(env.DB));
+const store = createSnapshotStore(
+  "keeper",
+  type({
+    country: "string",
+    raw: "unknown",
+    single: "number | null",
+  }),
+  new D1Adapter(env.DB),
+);
 
 // Provision once, not on each Worker request:
 await store.initialize();
-const next = await store.begin('AWS', 'sha256-hex-of-source', 2);
-if (next.status === 'upload') {
+const next = await store.begin("AWS", "sha256-hex-of-source", 2);
+if (next.status === "upload") {
   await store.append(next.batchId, 0, [
-    { country: 'DE', raw: { server_id: 'a' }, single: 123 },
-    { country: 'US', raw: { server_id: 'b' }, single: null }
+    { country: "DE", raw: { server_id: "a" }, single: 123 },
+    { country: "US", raw: { server_id: "b" }, single: null },
   ]);
   await store.publish(next.batchId);
 }
-const active = await store.readActivePage('AWS', { limit: 200 });
+const active = await store.readActivePage("AWS", { limit: 200 });
 ```
 
 API: `initialize`, `begin`, `import`, `append`, `countBatch`,
@@ -335,3 +340,178 @@ Snapshot pages accept an optional indexed string discriminator via
 `readActivePage(namespace, { kind: 'offer' })`. A composite JSON1 index
 on `(batchId, value.kind)` allows raw and materialized records in one
 atomic snapshot without querying the raw rows for public views.
+
+## Portable schema providers (ArkType and Zod 4)
+
+Existing `arktypeJsonTable(...)` consumers keep their API. Core document persistence
+is validator-neutral; validation is passed through an explicit `DocumentSchema`
+adapter. Field metadata for JSON1 predicates/indexes is independent of the
+validator's internal AST.
+
+A Zod application can use the optional provider subpath without importing ArkType:
+
+```ts
+import * as z from "zod";
+import { documentTable, zodSchema } from "supersqlite/zod";
+import { DurableObjectAdapter } from "supersqlite/do";
+
+const Bookmark = z.strictObject({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  tags: z.array(z.string()).default([]),
+});
+const makeBookmarks = (storage: DurableObjectStorage) =>
+  documentTable(
+    "Bookmark",
+    zodSchema(Bookmark, {
+      fields: {
+        id: { kind: "string" },
+        title: { kind: "string" },
+        description: { kind: "string" },
+        tags: { kind: "string-array" },
+      },
+    }),
+    "bookmarks",
+    new DurableObjectAdapter(storage),
+    ["title"],
+    {
+      indexes: {
+        fullText: { fields: ["title", "description"], weights: [3, 1] },
+        arrays: ["tags"],
+      },
+    },
+  );
+
+const bookmarks = makeBookmarks(ctx.storage);
+await bookmarks.initialize(); // provision/migration, not on each request
+await bookmarks.insert({
+  id: "1",
+  title: "SQLite on Workers",
+  description: "",
+  tags: ["cloudflare"],
+});
+const matches = await bookmarks.searchFullText("Workers");
+const tagged = await bookmarks.findByArray("tags", ["cloudflare"]);
+const counts = await bookmarks.arrayCounts("tags");
+```
+
+The `zod` package is an **optional peer dependency**; import from `supersqlite/zod`
+when needed. The standalone `supersqlite/core` module has no validator
+runtime dependency. **Important:** if a Zod input schema transforms values
+(e.g. string to number), provide an explicit `outputSchema` that validates the
+already-transformed stored representation. Persisted reads must never repeat
+input transforms. Optional/defaulted input fields that become required in
+output should also be represented correctly in that output schema.
+
+`supersqlite/do` uses `ctx.storage.sql.exec()` and synchronous
+`ctx.storage.transactionSync()` for atomic batches. Construct/provision the
+repository in the SQLite Durable Object initialization path, commonly via
+`ctx.blockConcurrencyWhile(...)`. Backends are local `better-sqlite3`,
+Cloudflare D1, or SQLite-backed Durable Objects.
+
+### Derived SQLite indexes
+
+- FTS5 is a declared, ranked, text index maintained by SQLite triggers. Its
+  `searchFullText(query, { limit })` uses `MATCH` and `bm25`, and supports
+  tokenizer `unicode61` (default) or `porter`.
+- String-array relations materialize `string[]` document fields into indexed
+  `(document_id, value)` pairs. Use `findByArray(field, values, { mode: 'all'|'any' })`
+  or `arrayCounts(field)`. Duplicate array values are deduplicated. The JSON
+  document remains the source of truth.
+- Insert/update/delete triggers atomically maintain derived indexes, including
+  changes under revision-CAS. Older documents are backfilled at provisioning.
+- `planDerivedIndexes()` is read-only; `applyDerivedIndexes()` refuses changed
+  managed definitions unless explicitly allowed. `rebuildDerivedIndexes()`
+  reindexes persisted documents. Metadata is kept in a SQLite table, not
+  `PRAGMA user_version`.
+- Derivative index definitions use simple top-level fields. Avoid silently
+  querying lazily-upcast legacy field names: run `upgradeDocuments()` before
+  indexing/querying fields renamed by schema evolution.
+
+### Development
+
+Use Bun 1.4.3, TypeScript 7 and Vite+ 1.5:
+
+```sh
+bun install
+bun run typecheck  # bun check — native TS7 checker
+bun run lint       # Vite+ / Oxlint
+bun run format     # Vite+ / Oxfmt
+bun run test       # Vite+ / Vitest
+bun run build      # TS7 declaration/JS emit
+bun run smoke      # packed module entrypoint checks
+```
+
+Integration tests run _real local workerd D1_ and a _bundled worker with a real
+SQLite Durable Object_ via Miniflare, in addition to native SQLite. A separate
+linkding-compatible application would consume these primitives; this library
+is not the linkding API server itself.
+
+### Standard Schema v1 and schema-independent snapshots
+
+The `supersqlite/core` entrypoint now accepts independent Standard Schema v1
+implementations. The schema itself only provides the input parser. A **separate
+stored-output schema** is required whenever input coercion, transforms, codecs,
+defaults, field stripping or shape changes would otherwise alter data on read.
+The adapter rejects asynchronous validators; all repository methods use a
+synchronous validation contract internally.
+
+```ts
+import { standardSchema, documentTable, createDocumentSnapshotStore } from "supersqlite/core";
+// input: a Standard Schema v1 validator, output: a validator of persisted values
+const documentSchema = standardSchema(input, {
+  outputSchema: output,
+  fields: { id: { kind: "string" }, title: { kind: "string" }, tags: { kind: "string-array" } },
+});
+const repo = documentTable("Bookmark", documentSchema, "bookmarks", sqliteAdapter);
+const snapshots = createDocumentSnapshotStore("history", documentSchema, sqliteAdapter);
+```
+
+For transformed partial updates, pass `patchSchema` explicitly. Unknown patch
+properties are rejected. Defaulted fields must not be added by a patch
+validator when they were absent from the patch. If an output validator mutates
+the stored record, SuperSQLite rejects it rather than persisting a changed
+representation. Zod `zodSchema()` accepts `outputSchema` and `patchSchema`
+with the same rules and supports a top-level Zod pipeline.
+
+Legacy `createSnapshotStore(name, arktypeSchema, adapter)` is preserved. The
+new core accepts any `DocumentSchema` and keeps snapshot import, publication,
+paging, kind filtering and pruning independent from the validator library.
+
+### Index provisioning and migration safety
+
+Run `planDerivedIndexes()` before provisioning. The plan checks live
+`sqlite_master` objects in addition to SuperSQLite-owned metadata: it reports
+`create`, `current`, `changed`, `missing` or `drift`.
+It detects removed/modified triggers and missing FTS5/array tables.
+`initialize()` does not silently repair damaged objects.
+
+A changed declaration requires explicit
+`applyDerivedIndexes({allowDefinitionChange:true})`. Missing or altered
+managed physical objects require explicit
+`applyDerivedIndexes({allowRepair:true})`; objects without ownership
+metadata are never automatically overwritten. On failure the batch must not
+publish an index as healthy; the operation can be corrected and retried.
+
+For production, first back up the portable document export, dry-review the
+index plan, materialize lazy document upcasters, perform the explicit migration,
+then query both FTS and tag counts and verify that `planDerivedIndexes()`
+reports `current` for all managed indexes. The native test suite exercises
+failure and retry against SQLite and D1, and missing-trigger repair in a real
+SQLite Durable Object.
+
+The `getAll()` repository method, snapshot pagination and portable
+SuperJSON envelopes support external migration; these are **not** a
+transactionally consistent point-in-time export while writes continue.
+
+For a reproducible **local** benchmark (not a claim about Cloudflare
+latency or resource consumption):
+
+```sh
+bun run bench:indexes
+BENCH_DOCS=10000 BENCH_ITERS=100 bun run bench:indexes
+```
+
+Reports environment, insertion time, median and p95 for FTS5 queries,
+tag-count aggregation and tag lookups.

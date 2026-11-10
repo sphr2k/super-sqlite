@@ -70,3 +70,56 @@ arktypeJsonTable('Rich', richSchema, 'rich', new BetterSQLite3Adapter(new Databa
 rich.selectScalar({ tags: true });
 const scalarProjection: Promise<Array<{ id: string; active: boolean }>> = repo.selectScalar({ active: true }).all();
 void scalarProjection;
+
+// Portable validator/provider type inference
+import * as z from "zod";
+import { zodSchema } from "./schema-zod.js";
+import { standardSchema } from "./schema-standard.js";
+import { documentTable } from "./factory-core.js";
+const inputWithMorph = z.strictObject({
+  id: z.string(),
+  age: z.string().regex(/^\d+$/).transform(Number),
+  tags: z.array(z.string()),
+});
+const outputFromMorph = z.strictObject({
+  id: z.string(),
+  age: z.number(),
+  tags: z.array(z.string()),
+});
+const genericDoc = zodSchema(inputWithMorph, {
+  outputSchema: outputFromMorph,
+  fields: { id: { kind: "string" }, age: { kind: "number" }, tags: { kind: "string-array" } },
+});
+const genericRepo = documentTable(
+  "Person",
+  genericDoc,
+  "person",
+  new BetterSQLite3Adapter(new Database(":memory:")),
+  ["age"],
+  { indexes: { arrays: ["tags"] } },
+);
+const typedInserted: Promise<{ id: string; age: number; tags: string[] }> = genericRepo.insert({
+  id: "a",
+  age: "23",
+  tags: ["k8s"],
+});
+void typedInserted;
+// @ts-expect-error transformed output cannot be inserted instead of string input
+genericRepo.insert({ id: "b", age: 24, tags: [] });
+// @ts-expect-error unknown field cannot be indexed
+documentTable("Person", genericDoc, "person", new BetterSQLite3Adapter(new Database(":memory:")), ["unknown"]);
+// @ts-expect-error arrays must be string-array output fields
+documentTable("Person", genericDoc, "person", new BetterSQLite3Adapter(new Database(":memory:")), [], {indexes:{arrays:["age"]}});
+const rawStandard = standardSchema(inputWithMorph, {
+  outputSchema: outputFromMorph,
+  fields: { id: { kind: "string" }, age: { kind: "number" }, tags: { kind: "string-array" } },
+});
+const standardRepo = documentTable(
+  "Standard",
+  rawStandard,
+  "standard",
+  new BetterSQLite3Adapter(new Database(":memory:")),
+);
+const typedStandardInserted: Promise<{ id: string; age: number; tags: string[] }> =
+  standardRepo.insert({ id: "s", age: "3", tags: [] });
+void typedStandardInserted;
