@@ -2,57 +2,19 @@
   "name": "supersqlite",
   "version": "1.0.0",
   "description": "Typed JSON documents on SQLite with SuperJSON, typed schemas and indexes",
-  "main": "./dist/index.js",
-  "scripts": {
-    "test": "vp test",
-    "start": "bun run build && node dist/demo.js",
-    "ecommerce:seed": "bun run build && node dist/seed-benchmark.js",
-    "ecommerce:bench": "bun run build && node dist/benchmark.js",
-    "typecheck": "bun check",
-    "infer": "vp exec src/cli.ts infer",
-    "build": "tsc",
-    "smoke": "node scripts/package-smoke.mjs",
-    "bench:projection": "bun run build && node benchmarks/projections.mjs",
-    "prepare": "npm run build",
-    "lint": "vp lint",
-    "format": "vp fmt",
-    "format:check": "vp fmt --check",
-    "verify": "bun check && vp lint"
-  },
   "keywords": [],
-  "author": "",
   "license": "ISC",
-  "type": "module",
-  "dependencies": {
-    "arktype": "^2.1.29",
-    "drizzle-orm": "^0.45.1",
-    "superjson": "^2.2.6",
-    "ulid": "^3.0.2"
-  },
-  "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261025.1",
-    "@faker-js/faker": "^10.2.0",
-    "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.0.10",
-    "better-sqlite3": "^12.6.2",
-    "drizzle-kit": "^0.31.8",
-    "miniflare": "^4.20260730.0",
-    "tsx": "^4.21.0",
-    "typescript": "7.0.2",
-    "vite-plus": "1.5.1",
-    "zod": "^4.6"
-  },
+  "author": "",
   "bin": {
     "super-sqlite": "./dist/cli.js"
   },
-  "engines": {
-    "node": "^20.19.0 || >=22.13.0"
-  },
-  "types": "./dist/index.d.ts",
   "files": [
     "dist/",
     "README.md"
   ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -96,6 +58,43 @@
       "default": "./dist/zod.js"
     }
   },
+  "scripts": {
+    "test": "vp test",
+    "start": "bun run build && node dist/demo.js",
+    "ecommerce:seed": "bun run build && node dist/seed-benchmark.js",
+    "ecommerce:bench": "bun run build && node dist/benchmark.js",
+    "typecheck": "bun check",
+    "infer": "bun src/cli.ts infer",
+    "build": "tsc",
+    "smoke": "node scripts/package-smoke.mjs",
+    "bench:projection": "bun run build && node benchmarks/projections.mjs",
+    "prepare": "npm run build",
+    "lint": "vp lint",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
+    "verify": "bun check && vp lint",
+    "bench:indexes": "bun run build && node scripts/benchmark-indexes.mjs"
+  },
+  "dependencies": {
+    "@standard-schema/spec": "1.1.0",
+    "arktype": "^2.1.29",
+    "drizzle-orm": "^0.45.1",
+    "superjson": "^2.2.6",
+    "ulid": "^3.0.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261025.1",
+    "@faker-js/faker": "^10.2.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.0.10",
+    "better-sqlite3": "^12.6.2",
+    "drizzle-kit": "^0.31.8",
+    "miniflare": "^4.20260730.0",
+    "tsx": "^4.21.0",
+    "typescript": "7.0.2",
+    "vite-plus": "1.5.1",
+    "zod": "^4.6"
+  },
   "peerDependencies": {
     "better-sqlite3": "^12.6.2",
     "zod": "^4.6"
@@ -109,8 +108,11 @@
     }
   },
   "overrides": {
-    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.1",
-    "@jridgewell/sourcemap-codec": "1.6.0"
+    "@jridgewell/sourcemap-codec": "1.6.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.5.1"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.13.0"
   },
   "packageManager": "bun@1.4.3"
 }

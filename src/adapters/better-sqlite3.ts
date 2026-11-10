@@ -1,5 +1,5 @@
-import type Database from 'better-sqlite3';
-import { bindParams, type SQLiteAdapter, type SqlStatement, type SqlRow } from './types.js';
+import type Database from "better-sqlite3";
+import { bindParams, type SQLiteAdapter, type SqlStatement, type SqlRow } from "./types.js";
 
 export class BetterSQLite3Adapter implements SQLiteAdapter {
   constructor(readonly database: Database.Database) {}
@@ -13,7 +13,9 @@ export class BetterSQLite3Adapter implements SQLiteAdapter {
   }
 
   async get<T extends SqlRow = SqlRow>(statement: SqlStatement): Promise<T | undefined> {
-    return this.database.prepare(statement.sql).get(...bindParams(statement.params)) as T | undefined;
+    return this.database.prepare(statement.sql).get(...bindParams(statement.params)) as
+      | T
+      | undefined;
   }
 
   async batch(statements: readonly SqlStatement[]): Promise<void> {

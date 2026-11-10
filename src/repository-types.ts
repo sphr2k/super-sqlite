@@ -56,7 +56,10 @@ export interface Repository<
   initialize(): Promise<void>;
   planIndexes(): Promise<IndexOperation[]>;
   planDerivedIndexes(): Promise<DerivedIndexPlan[]>;
-  applyDerivedIndexes(options?: { allowDefinitionChange?: boolean }): Promise<DerivedIndexPlan[]>;
+  applyDerivedIndexes(options?: {
+    allowDefinitionChange?: boolean;
+    allowRepair?: boolean;
+  }): Promise<DerivedIndexPlan[]>;
   rebuildDerivedIndexes(): Promise<void>;
   searchFullText(
     text: string,

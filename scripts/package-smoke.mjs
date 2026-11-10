@@ -10,6 +10,9 @@ assert.equal(typeof core.arktypeJsonTable, "function");
 assert.equal(typeof node.BetterSQLite3Adapter, "function");
 assert.equal(typeof d1.D1Adapter, "function");
 assert.equal(typeof portable.documentTable, "function");
+assert.equal(typeof portable.standardSchema, "function");
+assert.equal(typeof portable.createDocumentSnapshotStore, "function");
+assert.equal(typeof zod.createDocumentSnapshotStore, "function");
 assert.equal(typeof zod.zodSchema, "function");
 assert.equal(typeof durable.DurableObjectAdapter, "function");
 const build = spawnSync("npm", ["pack", "--dry-run", "--json"], { encoding: "utf8" });
@@ -27,6 +30,8 @@ for (const path of [
   "dist/zod.d.ts",
   "dist/durable-object.js",
   "dist/durable-object.d.ts",
+  "dist/schema-standard.js",
+  "dist/snapshot-core.js",
 ]) {
   assert.ok(files.has(path), `Missing package file: ${path}`);
 }
@@ -43,6 +48,8 @@ const neutral = [
   "projections.js",
   "mutations.js",
   "durable-object.js",
+  "schema-standard.js",
+  "snapshot-core.js",
 ];
 for (const name of neutral) {
   const contents = fs.readFileSync(new URL(`../dist/${name}`, import.meta.url), "utf8");

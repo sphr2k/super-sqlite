@@ -31,7 +31,7 @@ export function createDocumentMutations<T extends DocumentSchema<any, any>>(
   async function insert(values: DataInput | DataInput[]): Promise<Persisted | Persisted[]> {
     const arr = Array.isArray(values) ? values : [values];
     const stored = arr.map((value) => {
-      const validated = schema.parseInput(value) as DataType; // Persist morph output.
+      const validated = schema.parseOutput(schema.parseInput(value)) as DataType; // Validate persisted shape before storing.
       const suppliedId = (validated as { id?: unknown }).id;
       const id = typeof suppliedId === "string" && suppliedId.length > 0 ? suppliedId : ulid();
       return {

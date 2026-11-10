@@ -9,7 +9,6 @@ import {
   type FieldNames,
   type FilterFields,
   type QueryableKeys,
-  type SelectedKeys,
   type Projected,
   type DateFields,
 } from "./query.js";

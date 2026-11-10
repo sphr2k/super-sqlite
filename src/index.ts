@@ -36,3 +36,7 @@ export type {
   TextField,
   StringArrayField,
 } from "./derived-indexes.js";
+
+export { standardSchema } from "./schema-standard.js";
+
+export { createDocumentSnapshotStore } from "./snapshot-core.js";

@@ -1,0 +1,3 @@
+# Type-level negative tests contain @ts-expect-error directives bound to
+# specific source lines; automatic multiline wrapping invalidates assertions.
+src/types.test-d.ts

@@ -3,11 +3,13 @@ import * as z from "zod";
 import { zodSchema } from "../schema-zod.js";
 import { documentTable } from "../factory-core.js";
 import { DurableObjectAdapter } from "../adapters/durable-object.js";
+import { createDocumentSnapshotStore } from "../snapshot-core.js";
 
 const schema = z.strictObject({ id: z.string(), title: z.string(), tags: z.array(z.string()) });
 type Env = { STORE: DurableObjectNamespace };
 export class Store {
   private repo;
+  private snapshots;
   private adapter: DurableObjectAdapter;
   private ready: Promise<void>;
   constructor(ctx: DurableObjectState) {
@@ -27,7 +29,17 @@ export class Store {
       [],
       { indexes: { fullText: { fields: ["title"] }, arrays: ["tags"] } },
     );
-    this.ready = ctx.blockConcurrencyWhile(() => this.repo.initialize());
+    this.snapshots = createDocumentSnapshotStore(
+      "snapshots",
+      zodSchema(z.strictObject({ id: z.string(), count: z.number() }), {
+        fields: { id: { kind: "string" }, count: { kind: "number" } },
+      }),
+      adapter,
+    );
+    this.ready = ctx.blockConcurrencyWhile(async () => {
+      await this.repo.initialize();
+      await this.snapshots.initialize();
+    });
   }
   async fetch(request: Request) {
     try {
@@ -50,6 +62,33 @@ export class Store {
       if (url.pathname === "/search")
         return Response.json(await this.repo.searchFullText(url.searchParams.get("q") ?? ""));
       if (url.pathname === "/tags") return Response.json(await this.repo.arrayCounts("tags"));
+      if (url.pathname === "/index/plan")
+        return Response.json(await this.repo.planDerivedIndexes());
+      if (url.pathname === "/index/drop-trigger") {
+        await this.adapter.run({ sql: 'DROP TRIGGER "__ss_bookmarks_fts_update"' });
+        return Response.json({ ok: true });
+      }
+      if (url.pathname === "/index/repair") {
+        await this.repo.applyDerivedIndexes({ allowRepair: true });
+        return Response.json({ ok: true });
+      }
+      if (url.pathname === "/snapshots/seed") {
+        const begun = await this.snapshots.begin("do", "digest-one", 2);
+        if (begun.status !== "upload") throw new Error("Expected snapshot upload");
+        await this.snapshots.append(begun.batchId, 0, [
+          { id: "a", count: 5 },
+          { id: "b", count: 7 },
+        ]);
+        await this.snapshots.publish(begun.batchId);
+        return Response.json({ batchId: begun.batchId });
+      }
+      if (url.pathname === "/snapshots/page")
+        return Response.json(
+          await this.snapshots.readActivePage("do", {
+            limit: 1,
+            cursor: url.searchParams.get("cursor") ?? undefined,
+          }),
+        );
       if (url.pathname === "/rollback") {
         const a = this.adapter;
         await a.batch([

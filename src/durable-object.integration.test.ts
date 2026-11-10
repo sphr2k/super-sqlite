@@ -61,6 +61,21 @@ describe("SQLite-backed DO full application / real workerd", () => {
       expect((await invoke("/search?q=Workers")).json.map((r: any) => r.id)).toEqual(["a"]);
       expect((await invoke("/delete", { id: "a" })).status).toBe(200);
       expect((await invoke("/tags")).json).toEqual([]);
+      expect((await invoke("/index/plan")).json.every((r: any) => r.status === "current")).toBe(
+        true,
+      );
+      expect((await invoke("/index/drop-trigger", {})).status).toBe(200);
+      expect((await invoke("/index/plan")).json[0].status).toBe("missing");
+      expect((await invoke("/index/repair", {})).status).toBe(200);
+      expect((await invoke("/index/plan")).json[0].status).toBe("current");
+      expect((await invoke("/snapshots/seed", {})).status).toBe(200);
+      const first = await invoke("/snapshots/page");
+      expect(first.json.documents).toEqual([{ id: "a", count: 5 }]);
+      expect(first.json.nextCursor).toBeTruthy();
+      const second = await invoke(
+        "/snapshots/page?cursor=" + encodeURIComponent(first.json.nextCursor),
+      );
+      expect(second.json.documents).toEqual([{ id: "b", count: 7 }]);
     } finally {
       await mf?.dispose();
       rmSync(dir, { recursive: true, force: true });
